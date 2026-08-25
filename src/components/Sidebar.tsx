@@ -24,24 +24,32 @@ export type NavUser = {
 type Item = { href: string; label: string; icon: typeof LayoutDashboard; badge?: number };
 
 export function Sidebar({
-  user, pendingCount = 0, canApprove, isHr, isAdmin,
+  user, pendingCount = 0, canApprove, isHr, isAdmin, isFounder = false,
 }: {
   user: NavUser;
   pendingCount?: number;
   canApprove: boolean;
   isHr: boolean;
   isAdmin: boolean;
+  isFounder?: boolean;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
-  const primary: Item[] = [
-    { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/apply", label: "Apply for leave", icon: FileText },
-    { href: "/requests", label: "My requests", icon: ScrollText },
-    { href: "/comp-off", label: "Comp-off", icon: Gift },
-    { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  ];
+  // A founder sits outside the policy and holds no balances, so the personal leave items would
+  // only ever be empty for them.
+  const primary: Item[] = isFounder
+    ? [
+        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
+      ]
+    : [
+        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/apply", label: "Apply for leave", icon: FileText },
+        { href: "/requests", label: "My requests", icon: ScrollText },
+        { href: "/comp-off", label: "Comp-off", icon: Gift },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
+      ];
 
   const manage: Item[] = [
     ...(canApprove

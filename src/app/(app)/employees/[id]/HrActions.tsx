@@ -5,10 +5,10 @@ import { useFormStatus } from "react-dom";
 import { Loader2 } from "lucide-react";
 import {
   adjustBalanceAction, confirmEmployeeAction, recordAbsenceAction, recordExitAction,
-  resolveFlagAction, type HrState,
+  recordLeaveAction, resolveFlagAction, type HrState,
 } from "./actions";
 import { PolicyNote } from "@/components/ui/primitives";
-import { BALANCE_TYPES, LEAVE_META } from "@/lib/policy/types";
+import { BALANCE_TYPES, HALF_DAY_LABEL, LEAVE_META } from "@/lib/policy/types";
 import { todayKey } from "@/lib/date";
 
 function Submit({ label, tone = "primary" }: { label: string; tone?: "primary" | "danger" }) {
@@ -144,6 +144,101 @@ export function RecordExit({ userId }: { userId: string }) {
       <p className="text-[11px]" style={{ color: "var(--c-ink-400)" }}>
         §17 — leave before the last working day will then need both reporting manager and head of
         department approval, and excess CL or PL is flagged for recovery in full &amp; final settlement.
+      </p>
+    </form>
+  );
+}
+
+export function RecordLeaveTaken({ userId, name }: { userId: string; name: string }) {
+  const [state, action] = useActionState<HrState, FormData>(recordLeaveAction, {});
+  const [open, setOpen] = useState(false);
+  const [type, setType] = useState("CL");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const today = todayKey();
+  const singleDay = !!from && (from === to || !to);
+
+  if (state.ok) {
+    return (
+      <div className="space-y-3">
+        <PolicyNote level="INFO" title={state.ok}>
+          It appears in {name.split(" ")[0]}&rsquo;s leave history and the balance has been deducted.
+        </PolicyNote>
+        <button type="button" onClick={() => window.location.reload()} className="btn btn-ghost w-full">
+          Record another
+        </button>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost w-full">
+        Record leave already taken
+      </button>
+    );
+  }
+
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="userId" value={userId} />
+      <div>
+        <label className="label" htmlFor="rec-type">Leave type</label>
+        <select
+          id="rec-type" name="leaveType" className="field"
+          value={type} onChange={(e) => setType(e.target.value)}
+        >
+          {(["CL", "SL", "PL", "COMP_OFF", "MATERNITY", "PATERNITY"] as const).map((t) => (
+            <option key={t} value={t}>{LEAVE_META[t].name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="label" htmlFor="rec-from">First day</label>
+          <input
+            id="rec-from" name="from" type="date" max={today} className="field" required
+            value={from} onChange={(e) => setFrom(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="rec-to">Last day</label>
+          <input
+            id="rec-to" name="to" type="date" max={today} className="field"
+            value={to} onChange={(e) => setTo(e.target.value)} min={from || undefined}
+          />
+        </div>
+      </div>
+      {singleDay && (
+        <div>
+          <label className="label" htmlFor="rec-half">Duration</label>
+          <select id="rec-half" name="halfDay" className="field" defaultValue="NONE">
+            {(["NONE", "FIRST_HALF", "SECOND_HALF"] as const).map((h) => (
+              <option key={h} value={h}>{HALF_DAY_LABEL[h]}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div>
+        <label className="label" htmlFor="rec-reason">What was it for?</label>
+        <input
+          id="rec-reason" name="reason" className="field" required
+          placeholder="e.g. Family wedding — taken before LeaveBase went live."
+        />
+      </div>
+      {state.error && <PolicyNote level="BLOCK" title={state.error} />}
+      <div className="flex gap-2.5">
+        <button type="button" onClick={() => setOpen(false)} className="btn btn-ghost flex-1">
+          Cancel
+        </button>
+        <div className="flex-1">
+          <Submit label="Record it" />
+        </div>
+      </div>
+      <p className="text-[11px] leading-snug" style={{ color: "var(--c-ink-400)" }}>
+        The advance-notice rules (§6, §15) are skipped — they govern an employee asking for leave,
+        not you writing down what already happened. The §8 intervening-days rule and the balance
+        deduction still apply in full, and a shortfall becomes Loss of Pay (§13).
       </p>
     </form>
   );

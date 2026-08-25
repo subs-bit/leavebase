@@ -31,7 +31,8 @@ export async function runAccrual(
   const ly = leaveYearOf(asOf, cfg);
 
   const users = await db.user.findMany({
-    where: { isActive: true, ...(opts.userId ? { id: opts.userId } : {}) },
+    // Founders are outside the policy — no entitlement accrues to them (see isFounder).
+    where: { isActive: true, role: { not: "FOUNDER" }, ...(opts.userId ? { id: opts.userId } : {}) },
     select: {
       id: true, name: true, joinDate: true, confirmDate: true, lastWorkingDay: true, status: true,
     },

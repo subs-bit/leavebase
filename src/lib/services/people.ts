@@ -7,7 +7,7 @@ import { audit, notify } from "./activity";
 import { getPolicy } from "./context";
 import { runAccrual } from "./accrual";
 import { accruedToDate, leaveYearOf, roundHalf, toEligibility } from "@/lib/policy/leave-year";
-import { BALANCE_TYPES, LEAVE_META, ROLES } from "@/lib/policy/types";
+import { BALANCE_TYPES, LEAVE_META, participatesInLeave, ROLES } from "@/lib/policy/types";
 import type { LeaveType, Role } from "@/lib/policy/types";
 
 export type PersonInput = {
@@ -65,7 +65,10 @@ export async function nextEmpCode(prefix = "PRX"): Promise<string> {
  * HR user could quietly promote themselves and nobody would be above them.
  */
 export function canAssignRole(actorRole: string, targetRole: string): boolean {
-  if (actorRole === "ADMIN") return true;
+  // Only a founder can create another founder. An administrator must never be able to promote
+  // themselves — or anyone else — into the tier that sits above them.
+  if (targetRole === "FOUNDER") return actorRole === "FOUNDER";
+  if (actorRole === "FOUNDER" || actorRole === "ADMIN") return true;
   if (actorRole === "HR") return ["EMPLOYEE", "MANAGER", "HOD"].includes(targetRole);
   return false;
 }
@@ -159,12 +162,15 @@ export async function createEmployee(
     },
   });
 
-  // Accrual first, then the migration reconciliation — postOpeningBalances writes the difference
-  // between the figure you entered and what the ledger already holds, so the accrual must be in
-  // place before it runs or the balance would end up over-stated.
-  await runAccrual({ userId: user.id });
-  if (opts.openingBalances) {
-    await postOpeningBalances(user.id, opts.openingBalances, actor.id);
+  // Founders sit outside the policy, so no entitlement is created for them at all.
+  if (participatesInLeave(user.role)) {
+    // Accrual first, then the migration reconciliation — postOpeningBalances writes the difference
+    // between the figure you entered and what the ledger already holds, so the accrual must be in
+    // place before it runs or the balance would end up over-stated.
+    await runAccrual({ userId: user.id });
+    if (opts.openingBalances) {
+      await postOpeningBalances(user.id, opts.openingBalances, actor.id);
+    }
   }
 
   if (!opts.silent) {
@@ -192,7 +198,11 @@ export async function updateEmployee(
   const problem = await validate(input, actor.role, userId);
   if (problem) return { ok: false, error: problem };
 
-  // Changing an existing admin's role, or one's own, needs administrator rights.
+  // Editing someone who is *already* a founder is a founder-only act, whatever you are changing
+  // them into — otherwise an administrator could demote a founder and take the tier over.
+  if (before.role === "FOUNDER" && actor.role !== "FOUNDER") {
+    return { ok: false, error: "Only a founder can change a founder's record." };
+  }
   if (before.role !== input.role && !canAssignRole(actor.role, before.role)) {
     return { ok: false, error: "Only an administrator can change that person's role." };
   }
@@ -277,6 +287,15 @@ export async function setEmployeeActive(
   if (!user) return { ok: false, error: "Employee not found." };
 
   if (!active) {
+    if (user.role === "FOUNDER") {
+      if (actor.role !== "FOUNDER") {
+        return { ok: false, error: "Only a founder can deactivate a founder." };
+      }
+      const founders = await db.user.count({ where: { role: "FOUNDER", isActive: true } });
+      if (founders <= 1) {
+        return { ok: false, error: "This is the last active founder — appoint another first." };
+      }
+    }
     if (user.role === "ADMIN") {
       const admins = await db.user.count({ where: { role: "ADMIN", isActive: true } });
       if (admins <= 1) {

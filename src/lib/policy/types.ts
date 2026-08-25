@@ -129,7 +129,7 @@ export function annualEntitlement(type: LeaveType, cfg: PolicyConfig): number {
 
 // ── roles ─────────────────────────────────────────────────────────────────────
 
-export const ROLES = ["EMPLOYEE", "MANAGER", "HOD", "HR", "ADMIN"] as const;
+export const ROLES = ["EMPLOYEE", "MANAGER", "HOD", "HR", "ADMIN", "FOUNDER"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABEL: Record<Role, string> = {
@@ -138,16 +138,47 @@ export const ROLE_LABEL: Record<Role, string> = {
   HOD: "Head of Department",
   HR: "Human Resources",
   ADMIN: "Administrator",
+  FOUNDER: "Founder",
 };
+
+/**
+ * Founders sit above the policy rather than inside it.
+ *
+ * They exist to see everything and change anything. They are deliberately *not* leave-taking
+ * staff: no entitlement accrues to them, they hold no balances, they never appear in the leave
+ * calendar or in headcount and liability reporting, and they cannot apply for leave. Every place
+ * that counts "employees" therefore has to exclude them, or the org's numbers quietly drift.
+ */
+export function isFounder(role: string): boolean {
+  return role === "FOUNDER";
+}
+
+/** Does this person accrue leave and appear in leave reporting? */
+export function participatesInLeave(role: string): boolean {
+  return !isFounder(role);
+}
 
 /** Roles that can see organisation-wide data and act on any employee. */
 export function isHrOrAdmin(role: string): boolean {
-  return role === "HR" || role === "ADMIN";
+  return role === "HR" || role === "ADMIN" || role === "FOUNDER";
+}
+
+/** Roles that can reach policy settings, holidays, departments and the audit log. */
+export function isAdministrator(role: string): boolean {
+  return role === "ADMIN" || role === "FOUNDER";
 }
 
 /** Roles that have an approval inbox. */
 export function canApprove(role: string): boolean {
   return role === "MANAGER" || role === "HOD" || role === "HR" || role === "ADMIN";
+}
+
+/**
+ * Roles that may overrule a decision already made — approve, reject or cancel any request at any
+ * stage. Every such action is written to the audit log naming who did it.
+ */
+export function canOverrideDecisions(role: string): boolean {
+  return role === "HR" || role === "ADMIN" || role === "FOUNDER";
 }
 
 // ── statuses ──────────────────────────────────────────────────────────────────

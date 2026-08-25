@@ -10,7 +10,7 @@ import {
   Avatar, Chip, EmptyState, SectionHeader, leaveInk, leaveName,
 } from "@/components/ui/primitives";
 import {
-  AdjustBalance, ConfirmEmployee, RecordAbsence, RecordExit, ResolveFlag,
+  AdjustBalance, ConfirmEmployee, RecordAbsence, RecordExit, RecordLeaveTaken, ResolveFlag,
 } from "./HrActions";
 import { addDaysKey, dayKey, fmtDate, fmtDays, pluralDays, todayKey } from "@/lib/date";
 import { getBalances, getCompOffAvailable, getPolicy } from "@/lib/services/context";
@@ -285,6 +285,22 @@ export default async function EmployeeDetailPage({
                 </div>
               )}
             </section>
+
+            {hr && emp.isActive && emp.role !== "FOUNDER" && (
+              <section className="card p-5">
+                <SectionHeader
+                  eyebrow="History"
+                  title="Record leave already taken"
+                />
+                <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: "var(--c-ink-500)" }}>
+                  For leave taken before LeaveBase existed, or a day nobody filed at the time. It is
+                  deducted from the balance exactly as a normal request would be.
+                </p>
+                <div className="mt-4">
+                  <RecordLeaveTaken userId={emp.id} name={emp.name} />
+                </div>
+              </section>
+            )}
 
             {hr && (
               <section className="card p-5">

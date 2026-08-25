@@ -23,7 +23,9 @@ export default async function ReportsPage() {
 
   const [employees, approvedDays, requests, departments, lopRequests] = await Promise.all([
     db.user.findMany({
-      where: { isActive: true },
+      // Founders sit outside the policy: counting them would understate average leave taken and
+      // overstate headcount against liability.
+      where: { isActive: true, role: { not: "FOUNDER" } },
       select: {
         id: true, name: true, avatarHue: true, designation: true, status: true,
         departmentId: true, department: { select: { name: true } },
@@ -132,7 +134,7 @@ export default async function ReportsPage() {
     <>
       <PageHeader
         title="Reports"
-        subtitle={`Leave year ${ly.label} · ${employees.length} active employees`}
+        subtitle={`Leave year ${ly.label} · ${employees.length} employees on the policy`}
         actions={
           <a href="/api/export/leave.csv" className="btn btn-ghost hidden sm:inline-flex">
             <Download size={15} />

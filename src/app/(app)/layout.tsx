@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { Suspense } from "react";
 import { MobileNav, Sidebar } from "@/components/Sidebar";
 import { NavProgress } from "@/components/NavProgress";
-import { canApprove as roleCanApprove, isHrOrAdmin } from "@/lib/policy/types";
+import { canApprove as roleCanApprove, isAdministrator, isFounder, isHrOrAdmin } from "@/lib/policy/types";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -39,8 +39,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         pendingCount={pendingCount}
         canApprove={approver}
+        isFounder={isFounder(user.role)}
         isHr={isHrOrAdmin(user.role)}
-        isAdmin={user.role === "ADMIN"}
+        isAdmin={isAdministrator(user.role)}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {children}

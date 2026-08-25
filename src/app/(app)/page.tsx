@@ -17,11 +17,16 @@ import {
 } from "@/lib/date";
 import { getBalances, getCompOffAvailable, getPolicy } from "@/lib/services/context";
 import { daysUntilYearEnd, leaveYearOf, plCeilingHeadroom } from "@/lib/policy/leave-year";
-import { BALANCE_TYPES, canApprove, LEAVE_META } from "@/lib/policy/types";
+import { BALANCE_TYPES, canApprove, isFounder, LEAVE_META } from "@/lib/policy/types";
+import { FounderDashboard } from "./FounderDashboard";
 import { runMaintenance } from "@/lib/services/accrual";
 
 export default async function DashboardPage() {
   const user = await requireUser();
+
+  // A founder holds no leave of their own — they get the company view instead of empty rings.
+  if (isFounder(user.role)) return <FounderDashboard user={user} />;
+
   await runMaintenance(user.id);
 
   const today = todayKey();

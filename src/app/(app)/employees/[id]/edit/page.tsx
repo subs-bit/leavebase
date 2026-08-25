@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireHr } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { PageBody, PageHeader } from "@/components/PageHeader";
+import { isAdministrator } from "@/lib/policy/types";
 import { PersonForm } from "../../PersonForm";
 import { AccountControls } from "./AccountControls";
 import { dayKey } from "@/lib/date";
@@ -64,7 +65,8 @@ export default async function EditEmployeePage({
             }}
             departments={departments.map((d) => ({ id: d.id, label: d.name }))}
             managers={managers.map((m) => ({ id: m.id, label: m.name, sub: m.designation }))}
-            canAssignPrivileged={actor.role === "ADMIN"}
+            canAssignPrivileged={isAdministrator(actor.role)}
+            actorRole={actor.role}
           />
 
           <AccountControls

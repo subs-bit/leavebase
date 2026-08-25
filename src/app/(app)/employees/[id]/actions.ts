@@ -136,6 +136,35 @@ export async function recordExitAction(_prev: HrState, formData: FormData): Prom
   return { ok: "Recorded. Exit rules under §17 now apply to this employee." };
 }
 
+/** Record leave the employee already took — history, or a day nobody filed at the time. */
+export async function recordLeaveAction(_prev: HrState, formData: FormData): Promise<HrState> {
+  const hr = await requireHr();
+  const userId = String(formData.get("userId") ?? "");
+  const leaveType = String(formData.get("leaveType") ?? "") as LeaveType;
+  const from = String(formData.get("from") ?? "");
+  const to = String(formData.get("to") ?? "") || from;
+  const halfDay = (String(formData.get("halfDay") ?? "NONE") || "NONE") as
+    | "NONE" | "FIRST_HALF" | "SECOND_HALF";
+  const reason = String(formData.get("reason") ?? "");
+
+  if (!LEAVE_META[leaveType]) return { error: "Pick a leave type." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return { error: "Pick the first day." };
+
+  const { recordHistoricalLeave } = await import("@/lib/services/leave");
+  const result = await recordHistoricalLeave({
+    userId, leaveType, start: from, end: to, halfDay, reason, actorId: hr.id,
+  });
+  if (!result.ok) return { error: result.error };
+
+  revalidatePath(`/employees/${userId}`);
+  revalidatePath("/reports");
+  return {
+    ok:
+      `Recorded ${result.chargedDays} day(s) of ${LEAVE_META[leaveType].name}` +
+      (result.lopDays > 0 ? `, of which ${result.lopDays} is unpaid (§13).` : "."),
+  };
+}
+
 /** §12/§13 — mark days an employee was absent without approval. */
 export async function recordAbsenceAction(_prev: HrState, formData: FormData): Promise<HrState> {
   const hr = await requireHr();

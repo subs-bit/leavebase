@@ -5,7 +5,7 @@ import { addDaysKey, dayKey, DayKey, fmtDate, fmtRange, fromKey, pluralDays, tod
 import { evaluateRequest, Evaluation } from "@/lib/policy/evaluate";
 import { leaveYearOf, roundHalf } from "@/lib/policy/leave-year";
 import { currentStep, statusForProgress } from "@/lib/policy/routing";
-import { LEAVE_META } from "@/lib/policy/types";
+import { canOverrideDecisions, LEAVE_META } from "@/lib/policy/types";
 import type { HalfDay, LeaveType } from "@/lib/policy/types";
 import { getCompOffAvailable, loadEvalBundle } from "./context";
 import { audit, notify } from "./activity";
@@ -179,7 +179,7 @@ export async function decideRequest(
   if (!step) return { ok: false, error: "There is no pending approval step." };
 
   const approver = await db.user.findUnique({ where: { id: approverId }, select: { role: true, name: true } });
-  const isOverride = approver?.role === "HR" || approver?.role === "ADMIN";
+  const isOverride = canOverrideDecisions(approver?.role ?? "");
   if (step.approverId !== approverId && !isOverride) {
     return { ok: false, error: "This request is not awaiting your approval." };
   }
@@ -355,7 +355,8 @@ export async function cancelRequest(
   const isSelf = actorId === request.userId;
   const isApprover =
     request.approvals.some((a) => a.approverId === actorId) ||
-    ["HR", "ADMIN", "HOD"].includes(actor.role);
+    actor.role === "HOD" ||
+    canOverrideDecisions(actor.role);
 
   if (!isSelf && !isApprover) return { ok: false, error: "You can't cancel this request." };
 
@@ -588,3 +589,170 @@ function safeJson(s: string): Record<string, unknown> {
 }
 
 export { getCompOffAvailable };
+
+/**
+ * HR records leave an employee has already taken — history from before LeaveBase, or a day
+ * somebody forgot to file.
+ *
+ * The advance-notice rules (§15, and §6's 15/30-day requirements) deliberately do not apply here:
+ * they govern an employee *asking* for leave, not HR writing down what already happened. Everything
+ * that affects the numbers still applies in full — the §8 intervening-days rule, the balance
+ * deduction, and §13 Loss of Pay when the balance falls short.
+ *
+ * The record is created already approved, with no approval chain, and is marked in the audit log
+ * as entered by HR rather than decided by a manager.
+ */
+export async function recordHistoricalLeave(opts: {
+  userId: string;
+  leaveType: LeaveType;
+  start: DayKey;
+  end: DayKey;
+  halfDay: HalfDay;
+  reason: string;
+  actorId: string;
+}): Promise<
+  | { ok: true; requestId: string; chargedDays: number; lopDays: number }
+  | { ok: false; error: string }
+> {
+  const { userId, leaveType, start, end, halfDay, reason, actorId } = opts;
+
+  if (leaveType === "LOP") {
+    return { ok: false, error: "Use “Record unauthorised absence” for Loss of Pay days (§12)." };
+  }
+  if (!reason.trim()) return { ok: false, error: "Note what this leave was for." };
+
+  const { buildBreakdown } = await import("@/lib/policy/calendar");
+  const { getCalendarContext, getPolicy: loadPolicy, getBalances } = await import("./context");
+  const { diffDays } = await import("@/lib/date");
+
+  if (diffDays(start, end) < 0) return { ok: false, error: "The end date is before the start date." };
+
+  const cfg = await loadPolicy();
+  const ly = leaveYearOf(start, cfg);
+  if (leaveYearOf(end, cfg).label !== ly.label) {
+    return {
+      ok: false,
+      error: "This spans two leave years. Record it as two entries, split at 31 March (§3).",
+    };
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { name: true, role: true },
+  });
+  if (!user) return { ok: false, error: "Employee not found." };
+  if (user.role === "FOUNDER") {
+    return { ok: false, error: `${user.name} sits outside the leave policy, so there is no balance to record against.` };
+  }
+
+  const ctx = await getCalendarContext(userId, cfg);
+  const breakdown = buildBreakdown({ start, end, leaveType, halfDay, ctx });
+
+  if (breakdown.chargedDays <= 0) {
+    return {
+      ok: false,
+      error: "Those dates are all weekly offs or holidays, so no leave would be deducted.",
+    };
+  }
+
+  const clash = await db.leaveRequestDay.findFirst({
+    where: {
+      charged: { gt: 0 },
+      date: { gte: fromKey(start), lte: fromKey(end) },
+      request: { userId, status: { in: ["PENDING", "PENDING_HOD", "APPROVED"] } },
+    },
+    include: { request: { select: { code: true } } },
+  });
+  if (clash) {
+    return {
+      ok: false,
+      error: `${user.name} already has leave on those dates (${clash.request.code}). Cancel it first if this is a correction.`,
+    };
+  }
+
+  // §13 — a shortfall against the balance becomes unpaid rather than blocking the record.
+  const balances = await getBalances(userId, cfg, ly);
+  const available = balances.find((b) => b.leaveType === leaveType)?.available ?? 0;
+  const lopDays = Math.max(0, roundHalf(breakdown.chargedDays - available));
+  const payable = roundHalf(breakdown.chargedDays - lopDays);
+
+  const count = await db.leaveRequest.count();
+  const code = `HR-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
+  const meta = LEAVE_META[leaveType];
+
+  const request = await db.leaveRequest.create({
+    data: {
+      code,
+      userId,
+      leaveType,
+      startDate: fromKey(start),
+      endDate: fromKey(end),
+      halfDay,
+      chargedDays: breakdown.chargedDays,
+      calendarDays: breakdown.calendarDays,
+      reason: reason.trim(),
+      status: "APPROVED",
+      appliedAt: new Date(),
+      decidedAt: new Date(),
+      noticeDays: 0,
+      isLop: lopDays > 0,
+      lopDays,
+      policySnapshot: JSON.stringify({
+        recordedByHr: true,
+        recordedBy: actorId,
+        chargedDays: breakdown.chargedDays,
+        sandwichedDays: breakdown.sandwichedDays,
+        ruleId: "HR.HISTORICAL",
+      }),
+      days: {
+        create: breakdown.lines.map((l) => ({
+          date: fromKey(l.date),
+          dayType: l.dayType,
+          charged: l.charged,
+          reason: l.reason,
+          label: l.label,
+        })),
+      },
+    },
+  });
+
+  if (payable > 0) {
+    await db.leaveLedger.create({
+      data: {
+        userId,
+        leaveYear: ly.label,
+        leaveType,
+        entryKind: "AVAIL",
+        amount: -payable,
+        effectiveDate: fromKey(start),
+        requestId: request.id,
+        actorId,
+        ruleId: "HR.HISTORICAL",
+        note: `${meta.name} — ${fmtRange(start, end)} (recorded by HR, not applied for in advance)`,
+      },
+    });
+  }
+
+  await audit({
+    actorId,
+    action: "LEAVE_RECORDED",
+    entity: "LeaveRequest",
+    entityId: request.id,
+    summary:
+      `Recorded ${pluralDays(breakdown.chargedDays)} of ${meta.name} already taken by ${user.name} ` +
+      `(${fmtRange(start, end)})${lopDays > 0 ? `, of which ${pluralDays(lopDays)} unpaid under §13` : ""}`,
+    meta: { code, leaveType, chargedDays: breakdown.chargedDays, lopDays },
+  });
+
+  await notify({
+    userId,
+    kind: "APPROVED",
+    title: `${meta.name} recorded on your account`,
+    body:
+      `${fmtRange(start, end)} · ${pluralDays(breakdown.chargedDays)} deducted. ` +
+      `Entered by HR as leave already taken. Tell them if this looks wrong.`,
+    link: `/requests/${request.id}`,
+  });
+
+  return { ok: true, requestId: request.id, chargedDays: breakdown.chargedDays, lopDays };
+}

@@ -1,9 +1,11 @@
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { PageBody, PageHeader } from "@/components/PageHeader";
 import { getBalances, getCompOffAvailable, getPolicy } from "@/lib/services/context";
 import { leaveYearOf } from "@/lib/policy/leave-year";
 import { todayKey } from "@/lib/date";
 import { ApplyForm } from "./ApplyForm";
+import { isFounder } from "@/lib/policy/types";
 import type { LeaveType } from "@/lib/policy/types";
 
 export const metadata = { title: "Apply for leave" };
@@ -15,6 +17,8 @@ export default async function ApplyPage({
 }) {
   const params = await searchParams;
   const user = await requireUser();
+  // Founders are outside the policy and hold no balances, so there is nothing to apply against.
+  if (isFounder(user.role)) redirect("/");
   const today = todayKey();
   const cfg = await getPolicy();
   const ly = leaveYearOf(today, cfg);

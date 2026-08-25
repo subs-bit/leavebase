@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { db } from "./db";
-import { isHrOrAdmin } from "./policy/types";
+import { isAdministrator, isFounder, isHrOrAdmin } from "./policy/types";
 
 const COOKIE = "leavebase_session";
 const SESSION_DAYS = 30;
@@ -122,7 +122,14 @@ export async function requireHr(): Promise<SessionUser> {
 
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireUser();
-  if (user.role !== "ADMIN") redirect("/");
+  if (!isAdministrator(user.role)) redirect("/");
+  return user;
+}
+
+/** Only a founder may reach this — used for anything that governs founders themselves. */
+export async function requireFounder(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (!isFounder(user.role)) redirect("/");
   return user;
 }
 

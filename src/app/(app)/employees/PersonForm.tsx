@@ -96,12 +96,14 @@ export function PersonForm({
   departments,
   managers,
   canAssignPrivileged,
+  actorRole,
 }: {
   mode: "create" | "edit";
   initial?: PersonFormValues;
   departments: Option[];
   managers: Option[];
   canAssignPrivileged: boolean;
+  actorRole: string;
 }) {
   const router = useRouter();
   const [state, action] = useActionState<PeopleState, FormData>(
@@ -112,13 +114,17 @@ export function PersonForm({
   const [status, setStatus] = useState(v.status);
   const [role, setRole] = useState(v.role);
 
-  const roleOptions = (ROLES as readonly string[]).filter(
-    (r) => canAssignPrivileged || !["ADMIN", "HR"].includes(r) || r === v.role,
-  );
+  // Only a founder can create another founder; only an admin or founder can grant HR/Admin.
+  const roleOptions = (ROLES as readonly string[]).filter((r) => {
+    if (r === v.role) return true;
+    if (r === "FOUNDER") return actorRole === "FOUNDER";
+    if (r === "ADMIN" || r === "HR") return canAssignPrivileged;
+    return true;
+  });
 
   // A fresh joiner mid-year almost always carries balances across, so the section is only
   // offered at creation — afterwards, corrections belong in the ledger as adjustments.
-  const showOpening = mode === "create";
+  const showOpening = mode === "create" && role !== "FOUNDER";
 
   return (
     <form action={action} className="space-y-5">
@@ -200,6 +206,7 @@ export function PersonForm({
               : role === "HOD" ? "Second-level approver for long Privileged Leave (§6)."
               : role === "HR" ? "Full employee directory, reports, balance adjustments."
               : role === "ADMIN" ? "Everything, including policy settings and the audit log."
+              : role === "FOUNDER" ? "Above the policy: sees and changes everything, accrues no leave, and never appears in leave reporting."
               : "Can apply for their own leave only."
             }
           >
