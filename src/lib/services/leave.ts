@@ -1,0 +1,590 @@
+import "server-only";
+
+import { db } from "@/lib/db";
+import { addDaysKey, dayKey, DayKey, fmtDate, fmtRange, fromKey, pluralDays, todayKey } from "@/lib/date";
+import { evaluateRequest, Evaluation } from "@/lib/policy/evaluate";
+import { leaveYearOf, roundHalf } from "@/lib/policy/leave-year";
+import { currentStep, statusForProgress } from "@/lib/policy/routing";
+import { LEAVE_META } from "@/lib/policy/types";
+import type { HalfDay, LeaveType } from "@/lib/policy/types";
+import { getCompOffAvailable, loadEvalBundle } from "./context";
+import { audit, notify } from "./activity";
+
+export type DraftRequest = {
+  leaveType: LeaveType;
+  start: DayKey;
+  end: DayKey;
+  halfDay: HalfDay;
+  reason: string;
+  contactInfo?: string;
+  hasMedicalDoc?: boolean;
+  medicalDocRef?: string;
+  expectedDelivery?: DayKey | null;
+  maternityPattern?: "SPLIT_8_18" | "POST_26" | null;
+};
+
+/** Evaluate a draft against the live database. Used by the form preview and by submission. */
+export async function evaluateDraft(
+  userId: string,
+  draft: DraftRequest,
+  opts: { excludeRequestId?: string } = {},
+): Promise<Evaluation> {
+  const bundle = await loadEvalBundle(userId, {
+    excludeRequestId: opts.excludeRequestId,
+    from: draft.start,
+  });
+
+  const conflicts = await import("./context").then((m) =>
+    m.getTeamConflicts(userId, draft.start, draft.end),
+  );
+
+  return evaluateRequest({
+    employee: bundle.employee,
+    leaveType: draft.leaveType,
+    start: draft.start,
+    end: draft.end,
+    halfDay: draft.halfDay,
+    hasMedicalDoc: draft.hasMedicalDoc,
+    expectedDelivery: draft.expectedDelivery ?? null,
+    maternityPattern: draft.maternityPattern ?? null,
+    cfg: bundle.cfg,
+    ctx: bundle.ctx,
+    balances: bundle.balances,
+    existing: bundle.existing,
+    compOffAvailable: bundle.compOffAvailable,
+    compOffUsedThisYear: bundle.compOffUsedThisYear,
+    teamConflicts: conflicts,
+    manager: bundle.manager,
+    hod: bundle.hod,
+    hr: bundle.hr,
+  });
+}
+
+async function nextCode(prefix: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const count = await db.leaveRequest.count();
+  return `${prefix}-${year}-${String(count + 1).padStart(4, "0")}`;
+}
+
+/** Submit a leave request. Re-evaluates server-side — the client preview is never trusted. */
+export async function submitRequest(
+  userId: string,
+  draft: DraftRequest,
+): Promise<{ ok: true; requestId: string } | { ok: false; error: string; evaluation: Evaluation }> {
+  const evaluation = await evaluateDraft(userId, draft);
+
+  if (!evaluation.ok) {
+    const first = evaluation.findings.find((f) => f.level === "BLOCK");
+    return { ok: false, error: first?.title ?? "This request doesn't meet the leave policy.", evaluation };
+  }
+  if (!draft.reason.trim()) {
+    return { ok: false, error: "A reason is required.", evaluation };
+  }
+
+  const code = await nextCode("LV");
+  const meta = LEAVE_META[draft.leaveType];
+
+  const request = await db.$transaction(async (tx) => {
+    const created = await tx.leaveRequest.create({
+      data: {
+        code,
+        userId,
+        leaveType: draft.leaveType,
+        startDate: fromKey(draft.start),
+        endDate: fromKey(draft.end),
+        halfDay: draft.halfDay,
+        chargedDays: evaluation.chargedDays,
+        calendarDays: evaluation.breakdown.calendarDays,
+        reason: draft.reason.trim(),
+        contactInfo: draft.contactInfo ?? "",
+        status: evaluation.routing.length > 1 ? "PENDING" : "PENDING",
+        noticeDays: evaluation.noticeDays,
+        hasMedicalDoc: draft.hasMedicalDoc ?? false,
+        medicalDocRef: draft.medicalDocRef ?? "",
+        expectedDelivery: draft.expectedDelivery ? fromKey(draft.expectedDelivery) : null,
+        maternityPattern: draft.maternityPattern ?? null,
+        isLop: evaluation.lopDays > 0,
+        lopDays: evaluation.lopDays,
+        policySnapshot: JSON.stringify({
+          findings: evaluation.findings,
+          chargedDays: evaluation.chargedDays,
+          lopDays: evaluation.lopDays,
+          availableBefore: evaluation.availableBefore,
+          consecutiveRun: evaluation.breakdown.consecutiveRun,
+          convertsToPl: evaluation.convertsToPl,
+        }),
+        days: {
+          create: evaluation.breakdown.lines.map((l) => ({
+            date: fromKey(l.date),
+            dayType: l.dayType,
+            charged: l.charged,
+            reason: l.reason,
+            label: l.label,
+          })),
+        },
+        approvals: {
+          create: evaluation.routing.map((r) => ({
+            approverId: r.approverId!,
+            level: r.level,
+            levelLabel: r.label,
+            action: "PENDING",
+          })),
+        },
+      },
+    });
+    return created;
+  });
+
+  await audit({
+    actorId: userId,
+    action: "REQUEST_SUBMITTED",
+    entity: "LeaveRequest",
+    entityId: request.id,
+    summary: `Applied for ${pluralDays(evaluation.chargedDays)} of ${meta.name} (${fmtRange(draft.start, draft.end)})`,
+    meta: { code, leaveType: draft.leaveType, chargedDays: evaluation.chargedDays },
+  });
+
+  const firstStep = evaluation.routing[0];
+  if (firstStep?.approverId) {
+    const applicant = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await notify({
+      userId: firstStep.approverId,
+      kind: "REQUEST_SUBMITTED",
+      title: `${applicant?.name ?? "An employee"} requested ${meta.name}`,
+      body: `${fmtRange(draft.start, draft.end)} · ${pluralDays(evaluation.chargedDays)}`,
+      link: `/requests/${request.id}`,
+    });
+  }
+
+  return { ok: true, requestId: request.id };
+}
+
+/** Approve or reject at the current level. Advances or terminates the chain. */
+export async function decideRequest(
+  requestId: string,
+  approverId: string,
+  action: "APPROVED" | "REJECTED",
+  comment: string,
+): Promise<{ ok: true; status: string } | { ok: false; error: string }> {
+  const request = await db.leaveRequest.findUnique({
+    where: { id: requestId },
+    include: { approvals: { orderBy: { level: "asc" } }, user: { select: { name: true, id: true } } },
+  });
+  if (!request) return { ok: false, error: "Request not found." };
+  if (!["PENDING", "PENDING_HOD"].includes(request.status)) {
+    return { ok: false, error: `This request is already ${request.status.toLowerCase()}.` };
+  }
+
+  const step = currentStep(request.approvals);
+  if (!step) return { ok: false, error: "There is no pending approval step." };
+
+  const approver = await db.user.findUnique({ where: { id: approverId }, select: { role: true, name: true } });
+  const isOverride = approver?.role === "HR" || approver?.role === "ADMIN";
+  if (step.approverId !== approverId && !isOverride) {
+    return { ok: false, error: "This request is not awaiting your approval." };
+  }
+  if (action === "REJECTED" && !comment.trim()) {
+    return { ok: false, error: "A reason is required when rejecting." };
+  }
+
+  const updatedSteps = request.approvals.map((a) =>
+    a.id === step.id ? { ...a, action } : a,
+  );
+  const newStatus = statusForProgress(updatedSteps);
+
+  await db.$transaction(async (tx) => {
+    await tx.approval.update({
+      where: { id: step.id },
+      data: {
+        action,
+        comment: comment.trim(),
+        actedAt: new Date(),
+        ...(step.approverId !== approverId ? { approverId } : {}),
+      },
+    });
+
+    if (action === "REJECTED") {
+      await tx.approval.updateMany({
+        where: { requestId, action: "PENDING" },
+        data: { action: "SKIPPED" },
+      });
+    }
+
+    await tx.leaveRequest.update({
+      where: { id: requestId },
+      data: {
+        status: newStatus,
+        ...(newStatus === "APPROVED" || newStatus === "REJECTED" ? { decidedAt: new Date() } : {}),
+      },
+    });
+  });
+
+  if (newStatus === "APPROVED") {
+    await postAvailLedger(requestId);
+  }
+
+  await audit({
+    actorId: approverId,
+    action: action === "APPROVED" ? "REQUEST_APPROVED" : "REQUEST_REJECTED",
+    entity: "LeaveRequest",
+    entityId: requestId,
+    summary: `${action === "APPROVED" ? "Approved" : "Rejected"} ${request.code} — ${request.user.name}, ${LEAVE_META[request.leaveType as LeaveType].name}${comment.trim() ? ` — "${comment.trim()}"` : ""}`,
+    meta: { level: step.level, levelLabel: step.levelLabel, newStatus },
+  });
+
+  const meta = LEAVE_META[request.leaveType as LeaveType];
+  if (newStatus === "APPROVED" || newStatus === "REJECTED") {
+    await notify({
+      userId: request.userId,
+      kind: newStatus === "APPROVED" ? "APPROVED" : "REJECTED",
+      title: `${meta.name} ${newStatus === "APPROVED" ? "approved" : "rejected"}`,
+      body: `${fmtRange(dayKey(request.startDate), dayKey(request.endDate))}${comment.trim() ? ` — "${comment.trim()}"` : ""}`,
+      link: `/requests/${requestId}`,
+    });
+  } else {
+    const next = currentStep(updatedSteps);
+    if (next?.approverId) {
+      await notify({
+        userId: next.approverId,
+        kind: "REQUEST_SUBMITTED",
+        title: `${request.user.name}'s ${meta.name} needs your approval`,
+        body: `Approved by ${approver?.name ?? "the reporting manager"} — now with you as ${next.levelLabel}.`,
+        link: `/requests/${requestId}`,
+      });
+    }
+  }
+
+  return { ok: true, status: newStatus };
+}
+
+/**
+ * Post the balance debit for an approved request.
+ *
+ * Two policy subtleties land here:
+ *  §5 SL.DOC_FAILURE — sick leave beyond the medical-proof threshold with no documents is charged
+ *                      to Privileged Leave instead of Sick Leave.
+ *  §13 LOP.NO_BALANCE — any shortfall against the balance is unpaid rather than blocked.
+ */
+async function postAvailLedger(requestId: string): Promise<void> {
+  const request = await db.leaveRequest.findUniqueOrThrow({
+    where: { id: requestId },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  if (request.leaveType === "LOP") return;
+
+  const cfg = await (await import("./context")).getPolicy();
+  const start = dayKey(request.startDate);
+  const ly = leaveYearOf(start, cfg);
+  const snapshot = safeJson(request.policySnapshot);
+
+  // Comp-off consumes dated credits rather than a pooled number (§11).
+  if (request.leaveType === "COMP_OFF") {
+    const credits = await db.compOffCredit.findMany({
+      where: { userId: request.userId, status: "APPROVED" },
+      orderBy: { expiresAt: "asc" },
+    });
+    const need = Math.ceil(request.chargedDays);
+    const toConsume = credits.slice(0, need);
+    await db.$transaction(async (tx) => {
+      for (const c of toConsume) {
+        await tx.compOffCredit.update({
+          where: { id: c.id },
+          data: { status: "CONSUMED", consumedById: requestId },
+        });
+      }
+      await tx.leaveLedger.create({
+        data: {
+          userId: request.userId, leaveYear: ly.label, leaveType: "COMP_OFF",
+          entryKind: "AVAIL", amount: -request.chargedDays,
+          effectiveDate: request.startDate, requestId,
+          ruleId: "CO.AVAIL_APPROVAL",
+          note: `Compensatory off — ${fmtRange(start, dayKey(request.endDate))}`,
+        },
+      });
+    });
+    return;
+  }
+
+  // §5 — sick leave without medical documents is charged to PL.
+  let chargeType: string = request.leaveType;
+  let conversionNote = "";
+  if (request.leaveType === "SL" && snapshot.convertsToPl && !request.hasMedicalDoc) {
+    chargeType = "PL";
+    conversionNote = " — charged to Privileged Leave, medical documents not provided (§5)";
+  }
+
+  const payable = roundHalf(request.chargedDays - request.lopDays);
+
+  await db.$transaction(async (tx) => {
+    if (payable > 0) {
+      await tx.leaveLedger.create({
+        data: {
+          userId: request.userId, leaveYear: ly.label, leaveType: chargeType,
+          entryKind: "AVAIL", amount: -payable,
+          effectiveDate: request.startDate, requestId,
+          ruleId: chargeType !== request.leaveType ? "SL.DOC_FAILURE" : "",
+          note: `${LEAVE_META[request.leaveType as LeaveType].name} — ${fmtRange(start, dayKey(request.endDate))}${conversionNote}`,
+        },
+      });
+    }
+    if (request.lopDays > 0) {
+      await tx.leaveRequest.update({ where: { id: requestId }, data: { isLop: true } });
+    }
+  });
+}
+
+/** §16 — an approver cancels sanctioned leave, or the employee withdraws their own request. */
+export async function cancelRequest(
+  requestId: string,
+  actorId: string,
+  reason: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const request = await db.leaveRequest.findUnique({
+    where: { id: requestId },
+    include: { user: { select: { name: true } }, approvals: true },
+  });
+  if (!request) return { ok: false, error: "Request not found." };
+  if (["CANCELLED", "WITHDRAWN", "REJECTED"].includes(request.status)) {
+    return { ok: false, error: "This request is already closed." };
+  }
+
+  const actor = await db.user.findUniqueOrThrow({
+    where: { id: actorId },
+    select: { role: true, name: true },
+  });
+  const isSelf = actorId === request.userId;
+  const isApprover =
+    request.approvals.some((a) => a.approverId === actorId) ||
+    ["HR", "ADMIN", "HOD"].includes(actor.role);
+
+  if (!isSelf && !isApprover) return { ok: false, error: "You can't cancel this request." };
+
+  // §16 CANC.BY_EMPLOYEE — an employee cannot self-cancel leave that has already started.
+  if (isSelf && !isApprover && request.status === "APPROVED") {
+    if (dayKey(request.startDate) <= todayKey()) {
+      return {
+        ok: false,
+        error: "This leave has already started. Ask your reporting manager or HR to cancel it.",
+      };
+    }
+  }
+  if (!reason.trim()) return { ok: false, error: "A reason is required." };
+
+  const wasApproved = request.status === "APPROVED";
+  const newStatus = isSelf && !wasApproved ? "WITHDRAWN" : "CANCELLED";
+
+  await db.$transaction(async (tx) => {
+    await tx.leaveRequest.update({
+      where: { id: requestId },
+      data: { status: newStatus, cancelReason: reason.trim(), decidedAt: new Date() },
+    });
+    await tx.approval.updateMany({
+      where: { requestId, action: "PENDING" },
+      data: { action: "SKIPPED" },
+    });
+  });
+
+  // §16 CANC.CREDIT_BACK — reverse the debit.
+  if (wasApproved) {
+    const debits = await db.leaveLedger.findMany({
+      where: { requestId, entryKind: "AVAIL" },
+    });
+    for (const d of debits) {
+      await db.leaveLedger.create({
+        data: {
+          userId: d.userId, leaveYear: d.leaveYear, leaveType: d.leaveType,
+          entryKind: "CANCEL_CREDIT", amount: Math.abs(d.amount),
+          effectiveDate: new Date(), requestId, actorId,
+          ruleId: "CANC.CREDIT_BACK",
+          note: `Cancelled — ${reason.trim()}`,
+        },
+      });
+    }
+    await db.compOffCredit.updateMany({
+      where: { consumedById: requestId },
+      data: { status: "APPROVED", consumedById: null },
+    });
+  }
+
+  await audit({
+    actorId,
+    action: newStatus === "WITHDRAWN" ? "REQUEST_WITHDRAWN" : "REQUEST_CANCELLED",
+    entity: "LeaveRequest",
+    entityId: requestId,
+    summary: `${newStatus === "WITHDRAWN" ? "Withdrew" : "Cancelled"} ${request.code} — ${reason.trim()}`,
+    meta: { wasApproved },
+  });
+
+  if (!isSelf) {
+    await notify({
+      userId: request.userId,
+      kind: "CANCELLED",
+      title: `Your ${LEAVE_META[request.leaveType as LeaveType].name} was cancelled`,
+      body: `${fmtRange(dayKey(request.startDate), dayKey(request.endDate))} — ${reason.trim()}. If you proceed to take this leave it will be treated as unauthorised (§16).`,
+      link: `/requests/${requestId}`,
+    });
+  }
+
+  return { ok: true };
+}
+
+// ── comp-off (§11) ────────────────────────────────────────────────────────────
+
+export async function claimCompOff(
+  userId: string,
+  workedDate: DayKey,
+  reason: string,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const cfg = await (await import("./context")).getPolicy();
+  const { getCalendarContext } = await import("./context");
+  const ctx = await getCalendarContext(userId, cfg);
+  const { classifyDay } = await import("@/lib/policy/calendar");
+
+  const { type, label } = classifyDay(workedDate, ctx);
+  if (type === "WORKING") {
+    return {
+      ok: false,
+      error: `${fmtDate(workedDate)} is a normal working day. Comp-off is earned only by working a declared holiday or a weekly off (§11).`,
+    };
+  }
+  if (workedDate > todayKey()) {
+    return { ok: false, error: "You can only claim a comp-off for a day you've already worked." };
+  }
+  if (!reason.trim()) return { ok: false, error: "Describe what you worked on." };
+
+  const existing = await db.compOffCredit.findFirst({
+    where: { userId, workedDate: fromKey(workedDate), status: { in: ["PENDING", "APPROVED", "CONSUMED"] } },
+  });
+  if (existing) return { ok: false, error: `You've already claimed a comp-off for ${fmtDate(workedDate)}.` };
+
+  const ly = leaveYearOf(workedDate, cfg);
+  const expiresAt = addDaysKey(workedDate, cfg.compOffExpiryDays);
+
+  const credit = await db.compOffCredit.create({
+    data: {
+      userId,
+      workedDate: fromKey(workedDate),
+      workedDayType: type,
+      reason: reason.trim(),
+      status: "PENDING",
+      expiresAt: fromKey(expiresAt),
+      leaveYear: ly.label,
+    },
+  });
+
+  const user = await db.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { name: true, managerId: true },
+  });
+  if (user.managerId) {
+    await notify({
+      userId: user.managerId,
+      kind: "REQUEST_SUBMITTED",
+      title: `${user.name} claimed a comp-off`,
+      body: `Worked ${label} on ${fmtDate(workedDate)} — expires ${fmtDate(expiresAt)} if not used.`,
+      link: "/comp-off",
+    });
+  }
+
+  await audit({
+    actorId: userId, action: "COMPOFF_CLAIMED", entity: "CompOffCredit", entityId: credit.id,
+    summary: `Claimed comp-off for ${fmtDate(workedDate)} (${label})`,
+  });
+
+  return { ok: true, id: credit.id };
+}
+
+export async function decideCompOff(
+  creditId: string,
+  approverId: string,
+  action: "APPROVED" | "REJECTED",
+  comment: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const credit = await db.compOffCredit.findUnique({
+    where: { id: creditId },
+    include: { user: { select: { name: true, managerId: true } } },
+  });
+  if (!credit) return { ok: false, error: "Claim not found." };
+  if (credit.status !== "PENDING") return { ok: false, error: "This claim has already been decided." };
+
+  const approver = await db.user.findUniqueOrThrow({
+    where: { id: approverId }, select: { role: true, name: true },
+  });
+  const allowed =
+    credit.user.managerId === approverId || ["HR", "ADMIN", "HOD"].includes(approver.role);
+  if (!allowed) return { ok: false, error: "This claim is not yours to approve." };
+
+  await db.compOffCredit.update({
+    where: { id: creditId },
+    data: {
+      status: action,
+      approvedById: approverId,
+      approvedAt: new Date(),
+      rejectComment: action === "REJECTED" ? comment.trim() : "",
+    },
+  });
+
+  if (action === "APPROVED") {
+    const cfg = await (await import("./context")).getPolicy();
+    const ly = leaveYearOf(dayKey(credit.workedDate), cfg);
+    await db.leaveLedger.create({
+      data: {
+        userId: credit.userId, leaveYear: ly.label, leaveType: "COMP_OFF",
+        entryKind: "COMP_CREDIT", amount: 1,
+        effectiveDate: credit.workedDate, actorId: approverId,
+        ruleId: "CO.CLAIM_FIRST",
+        note: `Worked ${fmtDate(dayKey(credit.workedDate))} — expires ${fmtDate(dayKey(credit.expiresAt))}`,
+      },
+    });
+  }
+
+  await notify({
+    userId: credit.userId,
+    kind: action === "APPROVED" ? "APPROVED" : "REJECTED",
+    title: `Comp-off claim ${action === "APPROVED" ? "approved" : "rejected"}`,
+    body: action === "APPROVED"
+      ? `Credited for ${fmtDate(dayKey(credit.workedDate))}. Use it by ${fmtDate(dayKey(credit.expiresAt))} or it lapses (§11).`
+      : comment.trim() || "No reason given.",
+    link: "/comp-off",
+  });
+
+  await audit({
+    actorId: approverId, action: `COMPOFF_${action}`, entity: "CompOffCredit", entityId: creditId,
+    summary: `${action === "APPROVED" ? "Approved" : "Rejected"} ${credit.user.name}'s comp-off for ${fmtDate(dayKey(credit.workedDate))}`,
+  });
+
+  return { ok: true };
+}
+
+/** §11 CO.EXPIRY_20 — lapse credits past their 20-day window. Idempotent; safe to run often. */
+export async function expireCompOffs(asOf: DayKey = todayKey()): Promise<number> {
+  const stale = await db.compOffCredit.findMany({
+    where: { status: "APPROVED", expiresAt: { lt: fromKey(asOf) } },
+  });
+  for (const c of stale) {
+    await db.$transaction(async (tx) => {
+      await tx.compOffCredit.update({ where: { id: c.id }, data: { status: "EXPIRED" } });
+      await tx.leaveLedger.create({
+        data: {
+          userId: c.userId, leaveYear: c.leaveYear, leaveType: "COMP_OFF",
+          entryKind: "LAPSE", amount: -1,
+          effectiveDate: c.expiresAt, ruleId: "CO.EXPIRY_20",
+          note: `Comp-off for ${fmtDate(dayKey(c.workedDate))} lapsed — not availed within 20 days`,
+        },
+      });
+    });
+    await notify({
+      userId: c.userId, kind: "BALANCE_LAPSE",
+      title: "A comp-off lapsed",
+      body: `Your comp-off for ${fmtDate(dayKey(c.workedDate))} expired without being used (§11).`,
+      link: "/comp-off",
+    });
+  }
+  return stale.length;
+}
+
+function safeJson(s: string): Record<string, unknown> {
+  try { return JSON.parse(s) as Record<string, unknown>; } catch { return {}; }
+}
+
+export { getCompOffAvailable };

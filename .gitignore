@@ -1,0 +1,22 @@
+# dependencies and build output
+node_modules
+.next
+out
+next-env.d.ts
+
+# local database files — never commit employee data
+*.db
+*.db-journal
+
+# environment files hold the database connection string. Never commit them.
+# .env.example is committed instead, as a template.
+.env
+.env.local
+.env.*.local
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+
+# typescript build cache
+*.tsbuildinfo

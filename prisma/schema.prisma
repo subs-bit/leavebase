@@ -1,0 +1,260 @@
+// LeaveBase — Prismix Studios
+// Data model. Balances are derived from an append-only ledger (see docs/POLICY_SPEC.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────── org
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique
+  hodId     String?
+  hod       User?    @relation("DeptHod", fields: [hodId], references: [id])
+  members   User[]   @relation("DeptMembers")
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id             String    @id @default(cuid())
+  empCode        String    @unique
+  name           String
+  email          String    @unique
+  passwordHash   String
+  role           String    @default("EMPLOYEE") // EMPLOYEE MANAGER HOD HR ADMIN
+  designation    String    @default("")
+  gender         String    @default("UNSPECIFIED") // MALE FEMALE OTHER UNSPECIFIED
+  employmentType String    @default("FULL_TIME") // FULL_TIME PART_TIME CONTRACT CONSULTANT
+  status         String    @default("PROBATION") // PROBATION CONFIRMED RESIGNED EXITED
+  joinDate       DateTime
+  confirmDate    DateTime?
+  resignDate     DateTime?
+  lastWorkingDay DateTime?
+  phone          String    @default("")
+  location       String    @default("Mumbai")
+  avatarHue      Int       @default(260)
+  isActive       Boolean   @default(true)
+  /// Set when HR issues a temporary password; forces a change at next sign-in.
+  mustChangePassword Boolean @default(false)
+  deactivatedAt  DateTime?
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  departmentId String?
+  department   Department? @relation("DeptMembers", fields: [departmentId], references: [id])
+  headedDept   Department[] @relation("DeptHod")
+
+  managerId String?
+  manager   User?   @relation("Reports", fields: [managerId], references: [id])
+  reports   User[]  @relation("Reports")
+
+  requests      LeaveRequest[] @relation("Requester")
+  approvals     Approval[]     @relation("Approver")
+  ledger        LeaveLedger[]  @relation("LedgerOwner")
+  ledgerActed   LeaveLedger[]  @relation("LedgerActor")
+  compOffs      CompOffCredit[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+  flags         AbsenceFlag[]  @relation("FlaggedUser")
+
+  @@index([departmentId])
+  @@index([managerId])
+}
+
+// ─────────────────────────────────────────────────────────── calendar
+
+model Holiday {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  name      String
+  type      String   @default("DECLARED") // NATIONAL DECLARED RESTRICTED
+  year      Int
+  createdAt DateTime @default(now())
+
+  @@index([year])
+}
+
+// ─────────────────────────────────────────────────────────── requests
+
+model LeaveRequest {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  userId        String
+  user          User     @relation("Requester", fields: [userId], references: [id], onDelete: Cascade)
+  leaveType     String // CL SL PL MATERNITY PATERNITY COMP_OFF LOP
+  startDate     DateTime
+  endDate       DateTime
+  halfDay       String   @default("NONE") // NONE FIRST_HALF SECOND_HALF
+  chargedDays   Float
+  calendarDays  Int
+  reason        String
+  contactInfo   String   @default("")
+  status        String   @default("PENDING") // PENDING PENDING_HOD APPROVED REJECTED CANCELLED WITHDRAWN
+  appliedAt     DateTime @default(now())
+  decidedAt     DateTime?
+  noticeDays    Int      @default(0)
+  medicalDocRef String   @default("")
+  hasMedicalDoc Boolean  @default(false)
+  // maternity specifics
+  expectedDelivery DateTime?
+  maternityPattern String? // SPLIT_8_18 POST_26
+  // policy evaluation snapshot at submission time (JSON)
+  policySnapshot String @default("{}")
+  isLop          Boolean @default(false)
+  lopDays        Float   @default(0)
+  cancelReason   String  @default("")
+
+  days      LeaveRequestDay[]
+  approvals Approval[]
+  ledger    LeaveLedger[]
+  usedCompOffs CompOffCredit[] @relation("CompOffConsumed")
+
+  @@index([userId])
+  @@index([status])
+  @@index([startDate])
+}
+
+model LeaveRequestDay {
+  id        String   @id @default(cuid())
+  requestId String
+  request   LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  date      DateTime
+  dayType   String // WORKING WEEKLY_OFF HOLIDAY
+  charged   Float // 0, 0.5 or 1
+  reason    String @default("") // e.g. "Sandwiched — GEN.SANDWICH"
+  label     String @default("")
+
+  @@index([requestId])
+  @@index([date])
+}
+
+model Approval {
+  id         String   @id @default(cuid())
+  requestId  String
+  request    LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approverId String
+  approver   User     @relation("Approver", fields: [approverId], references: [id])
+  level      Int // 1 = RM, 2 = HOD/HR, 3 = CEO
+  levelLabel String   @default("Reporting Manager")
+  action     String   @default("PENDING") // PENDING APPROVED REJECTED SKIPPED
+  comment    String   @default("")
+  actedAt    DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([approverId, action])
+  @@index([requestId])
+}
+
+// ─────────────────────────────────────────────────────────── balances
+
+model LeaveLedger {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("LedgerOwner", fields: [userId], references: [id], onDelete: Cascade)
+  leaveYear String // "2026-27"
+  leaveType String
+  entryKind String // OPENING ACCRUAL COMP_CREDIT AVAIL CANCEL_CREDIT LAPSE ADJUSTMENT CONVERSION
+  amount    Float // positive = credit, negative = debit
+  note      String   @default("")
+  ruleId    String   @default("")
+  effectiveDate DateTime
+  requestId String?
+  request   LeaveRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  actorId   String?
+  actor     User?    @relation("LedgerActor", fields: [actorId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([userId, leaveYear, leaveType])
+}
+
+model CompOffCredit {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workedDate    DateTime
+  workedDayType String // HOLIDAY WEEKLY_OFF
+  reason        String
+  status        String   @default("PENDING") // PENDING APPROVED REJECTED CONSUMED EXPIRED
+  expiresAt     DateTime
+  approvedById  String?
+  approvedAt    DateTime?
+  rejectComment String   @default("")
+  consumedById  String?
+  consumedBy    LeaveRequest? @relation("CompOffConsumed", fields: [consumedById], references: [id], onDelete: SetNull)
+  leaveYear     String
+  createdAt     DateTime @default(now())
+
+  @@index([userId, status])
+}
+
+// ─────────────────────────────────────────────────────────── ops
+
+model AbsenceFlag {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation("FlaggedUser", fields: [userId], references: [id], onDelete: Cascade)
+  fromDate   DateTime
+  toDate     DateTime
+  workingDays Int
+  severity   String // WARNING ABSCONDING
+  status     String   @default("OPEN") // OPEN RESOLVED DISMISSED
+  note       String   @default("")
+  resolution String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([userId, status])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String // REQUEST_SUBMITTED APPROVED REJECTED CANCELLED COMP_EXPIRING BALANCE_LAPSE ABSENCE_FLAG
+  title     String
+  body      String   @default("")
+  link      String   @default("")
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String   @default("")
+  action    String
+  entity    String
+  entityId  String   @default("")
+  summary   String   @default("")
+  meta      String   @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model PolicySetting {
+  id    String @id @default("singleton")
+  json  String
+  updatedAt DateTime @updatedAt
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
