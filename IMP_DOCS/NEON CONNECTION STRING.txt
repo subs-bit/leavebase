@@ -1,0 +1,6 @@
+Neon Connection String
+
+Account used - subs@prismixstudios.com (Login With Google)
+
+Connection Strig - 
+postgresql://neondb_owner:npg_VgFA26LEnoCI@ep-broad-shadow-az1gsc2i-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
