@@ -114,11 +114,10 @@ export function PersonForm({
   const [status, setStatus] = useState(v.status);
   const [role, setRole] = useState(v.role);
 
-  // Only a founder can create another founder; only an admin or founder can grant HR/Admin.
+  // Founders and administrators can grant Founder, Admin and HR; HR can grant the rest.
   const roleOptions = (ROLES as readonly string[]).filter((r) => {
     if (r === v.role) return true;
-    if (r === "FOUNDER") return actorRole === "FOUNDER";
-    if (r === "ADMIN" || r === "HR") return canAssignPrivileged;
+    if (r === "FOUNDER" || r === "ADMIN" || r === "HR") return canAssignPrivileged;
     return true;
   });
 

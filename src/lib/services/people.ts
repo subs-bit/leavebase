@@ -65,9 +65,14 @@ export async function nextEmpCode(prefix = "PRX"): Promise<string> {
  * HR user could quietly promote themselves and nobody would be above them.
  */
 export function canAssignRole(actorRole: string, targetRole: string): boolean {
-  // Only a founder can create another founder. An administrator must never be able to promote
-  // themselves — or anyone else — into the tier that sits above them.
-  if (targetRole === "FOUNDER") return actorRole === "FOUNDER";
+  // Administrators may grant and revoke the Founder role as well as their own. That is a
+  // deliberate choice for a small studio where the administrator is trusted — the alternative,
+  // reserving it to founders, is what stops an administrator promoting themselves above the
+  // people who appointed them. The `last founder` and `last administrator` guards below still
+  // apply, so neither tier can be emptied by accident.
+  if (targetRole === "FOUNDER" || targetRole === "ADMIN") {
+    return actorRole === "FOUNDER" || actorRole === "ADMIN";
+  }
   if (actorRole === "FOUNDER" || actorRole === "ADMIN") return true;
   if (actorRole === "HR") return ["EMPLOYEE", "MANAGER", "HOD"].includes(targetRole);
   return false;
@@ -198,10 +203,16 @@ export async function updateEmployee(
   const problem = await validate(input, actor.role, userId);
   if (problem) return { ok: false, error: problem };
 
-  // Editing someone who is *already* a founder is a founder-only act, whatever you are changing
-  // them into — otherwise an administrator could demote a founder and take the tier over.
-  if (before.role === "FOUNDER" && actor.role !== "FOUNDER") {
-    return { ok: false, error: "Only a founder can change a founder's record." };
+  // Editing an existing founder is open to founders and administrators alike.
+  if (before.role === "FOUNDER" && !["FOUNDER", "ADMIN"].includes(actor.role)) {
+    return { ok: false, error: "Only a founder or an administrator can change a founder's record." };
+  }
+  // The tier must never be emptied — someone has to be able to appoint the next one.
+  if (before.role === "FOUNDER" && input.role !== "FOUNDER") {
+    const founders = await db.user.count({ where: { role: "FOUNDER", isActive: true } });
+    if (founders <= 1) {
+      return { ok: false, error: "This is the last founder — appoint another before changing this one." };
+    }
   }
   if (before.role !== input.role && !canAssignRole(actor.role, before.role)) {
     return { ok: false, error: "Only an administrator can change that person's role." };
@@ -288,8 +299,8 @@ export async function setEmployeeActive(
 
   if (!active) {
     if (user.role === "FOUNDER") {
-      if (actor.role !== "FOUNDER") {
-        return { ok: false, error: "Only a founder can deactivate a founder." };
+      if (!["FOUNDER", "ADMIN"].includes(actor.role)) {
+        return { ok: false, error: "Only a founder or an administrator can deactivate a founder." };
       }
       const founders = await db.user.count({ where: { role: "FOUNDER", isActive: true } });
       if (founders <= 1) {
@@ -348,8 +359,11 @@ export async function resetPassword(
 ): Promise<{ ok: true; tempPassword: string } | { ok: false; error: string }> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
   if (!user) return { ok: false, error: "Employee not found." };
-  if (user.role === "ADMIN" && actor.role !== "ADMIN") {
-    return { ok: false, error: "Only an administrator can reset an administrator's password." };
+  if (["ADMIN", "FOUNDER"].includes(user.role) && !["ADMIN", "FOUNDER"].includes(actor.role)) {
+    return {
+      ok: false,
+      error: "Only an administrator or a founder can reset an administrator or founder password.",
+    };
   }
 
   const tempPassword = generateTempPassword();
