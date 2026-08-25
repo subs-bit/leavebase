@@ -6,6 +6,11 @@ import { LoginForm } from "./LoginForm";
 
 export const metadata = { title: "Sign in" };
 
+// Must never be prerendered: this page asks the database whether any account exists, and a
+// build-time answer would be frozen forever — sending everyone to /setup on a live instance, or
+// hiding /setup on a brand-new one.
+export const dynamic = "force-dynamic";
+
 export default async function LoginPage() {
   // A brand-new instance has nobody to sign in as — send them to first-run setup.
   if ((await db.user.count()) === 0) redirect("/setup");
