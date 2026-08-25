@@ -262,6 +262,7 @@ export default async function DashboardPage() {
                     key={type}
                     available={notEligible ? 0 : available}
                     granted={notEligible ? 1 : granted}
+                    annualEntitlement={notEligible || isComp ? undefined : b.entitlementAnnual}
                     color={leaveInk(type)}
                     label={LEAVE_META[type].short === "CO" ? "Comp-off" : LEAVE_META[type].name.replace(" Leave", "")}
                     sublabel={

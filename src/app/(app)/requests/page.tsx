@@ -188,6 +188,7 @@ async function BalanceStatement({
                   key={t}
                   available={available}
                   granted={Math.max(b.granted, available, 1)}
+                  annualEntitlement={t === "COMP_OFF" ? undefined : b.entitlementAnnual}
                   color={leaveInk(t)}
                   label={LEAVE_META[t].name}
                 />

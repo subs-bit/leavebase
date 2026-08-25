@@ -257,6 +257,7 @@ export default async function EmployeeDetailPage({
                       key={t}
                       available={notEligible ? 0 : available}
                       granted={notEligible ? 1 : Math.max(b.granted, available, 1)}
+                      annualEntitlement={notEligible || t === "COMP_OFF" ? undefined : b.entitlementAnnual}
                       color={leaveInk(t)}
                       label={LEAVE_META[t].name.replace(" Leave", "")}
                       sublabel={notEligible ? "On confirmation" : `${fmtDays(b.used)} used`}
