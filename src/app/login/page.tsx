@@ -1,7 +1,7 @@
-import Image from "next/image";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { PrismixMark } from "@/components/ui/Logo";
 import { LoginForm } from "./LoginForm";
 
 export const metadata = { title: "Sign in" };
@@ -38,14 +38,32 @@ export default async function LoginPage() {
 
       <div className="relative z-10 w-full max-w-[420px]">
         <div className="mb-8 flex flex-col items-center text-center">
-          <Image
-            src="/brand/prismix-lockup.png"
-            alt="Prismix Studios"
-            width={244}
-            height={259}
-            priority
-            className="h-[104px] w-auto dark:brightness-0 dark:invert"
-          />
+          {/*
+            The lockup PNG is a colour-gradient ring plus black wordmark on transparent — there is
+            no filter that makes that legible in dark mode (brightness-0 + invert previously
+            flattened the whole thing into a solid white blob, losing the ring entirely). The mark
+            is drawn as SVG instead, which already carries its own colours in both themes, and the
+            wordmark is real text so it can follow the ink token like everything else on the page.
+          */}
+          <PrismixMark size={72} id="login" />
+          <p
+            className="mt-4 text-[20px] font-extrabold uppercase tracking-[0.12em]"
+            style={{ color: "var(--c-ink-900)" }}
+          >
+            Prismix
+          </p>
+          <p
+            className="-mt-1 text-[11px] font-bold uppercase tracking-[0.3em]"
+            style={{ color: "var(--c-ink-500)" }}
+          >
+            Studios
+          </p>
+          <p
+            className="mt-1 text-[9px] font-semibold uppercase tracking-[0.18em]"
+            style={{ color: "var(--c-ink-400)" }}
+          >
+            Entertainment Redefined
+          </p>
           <h1 className="mt-6 text-[28px] tracking-[-0.03em]">
             Leave<span className="text-gradient">Base</span>
           </h1>

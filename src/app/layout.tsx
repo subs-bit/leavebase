@@ -18,6 +18,19 @@ export const metadata: Metadata = {
   },
   description:
     "Leave management for Prismix Studios — apply, approve and track leave against the company leave policy.",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    // The browser tab / bookmark bar. Multiple sizes so it stays crisp from 16px favicons up to
+    // the high-DPI display Chrome uses for pinned tabs.
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon-16.png", sizes: "16x16", type: "image/png" },
+      { url: "/icon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    // iOS "Add to Home Screen" reads this specifically — it ignores the manifest icons.
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {
