@@ -40,6 +40,9 @@ model User {
   phone          String    @default("")
   location       String    @default("Mumbai")
   avatarHue      Int       @default(260)
+  /// SYSTEM follows the device setting; LIGHT and DARK are an explicit choice that follows the
+  /// employee across browsers and machines.
+  themePreference String   @default("SYSTEM")
   isActive       Boolean   @default(true)
   /// Set when HR issues a temporary password; forces a change at next sign-in.
   mustChangePassword Boolean @default(false)

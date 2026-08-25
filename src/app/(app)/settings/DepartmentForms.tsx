@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Loader2, Plus, Trash2 } from "lucide-react";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import {
   createDepartmentAction, deleteDepartmentAction, setHodAction, type SettingsState,
 } from "./actions";
@@ -60,7 +61,6 @@ export function HodPicker({
 }) {
   const [state, action] = useActionState<SettingsState, FormData>(setHodAction, {});
   const [value, setValue] = useState(currentHodId ?? "");
-  const { pending } = useFormStatus();
 
   return (
     <form action={action} className="flex flex-wrap items-center gap-2">
@@ -78,10 +78,9 @@ export function HodPicker({
         ))}
       </select>
       {value !== (currentHodId ?? "") && (
-        <button type="submit" disabled={pending} className="btn btn-primary" style={{ padding: "8px 14px" }}>
-          {pending && <Loader2 size={13} className="animate-spin" />}
+        <SubmitButton variant="primary" style={{ padding: "8px 14px" }} pendingLabel="Saving…">
           Save
-        </button>
+        </SubmitButton>
       )}
       {state.error && (
         <span className="text-[11.5px] font-semibold" style={{ color: "var(--c-danger-ink)" }}>
@@ -95,7 +94,6 @@ export function HodPicker({
 export function DeleteDepartment({ departmentId, name }: { departmentId: string; name: string }) {
   const [state, action] = useActionState<SettingsState, FormData>(deleteDepartmentAction, {});
   const [confirming, setConfirming] = useState(false);
-  const { pending } = useFormStatus();
 
   if (state.error) {
     return (
@@ -125,9 +123,9 @@ export function DeleteDepartment({ departmentId, name }: { departmentId: string;
       <button type="button" onClick={() => setConfirming(false)} className="btn btn-quiet" style={{ padding: "5px 10px", fontSize: 11.5 }}>
         Keep
       </button>
-      <button type="submit" disabled={pending} className="btn btn-danger" style={{ padding: "5px 10px", fontSize: 11.5 }}>
+      <SubmitButton variant="danger" style={{ padding: "5px 10px", fontSize: 11.5 }} pendingLabel="Deleting…">
         Delete
-      </button>
+      </SubmitButton>
     </form>
   );
 }

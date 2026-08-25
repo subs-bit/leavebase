@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Check, Loader2, X } from "lucide-react";
 import { cancelAction, decideAction, type ActionState } from "@/app/(app)/requests/actions";
+import { SubmitButton } from "./ui/SubmitButton";
 import { PolicyNote } from "./ui/primitives";
 
 function Pending({ label, tone }: { label: string; tone: "success" | "danger" }) {
@@ -72,24 +73,25 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
       )}
 
       <div className="flex gap-2.5">
-        <button
-          type="submit"
+        <SubmitButton
+          variant="success"
+          className="flex-1"
           onClick={() => setMode("approve")}
-          className="btn btn-success flex-1"
+          icon={<Check size={15} strokeWidth={2.8} />}
+          pendingLabel="Approving…"
         >
-          <Check size={15} strokeWidth={2.8} />
           Approve
-        </button>
-        <button
-          type="submit"
+        </SubmitButton>
+        <SubmitButton
+          variant="danger"
+          className="flex-1"
           onClick={() => setMode("reject")}
           disabled={comment.trim().length < 3}
-          title={comment.trim().length < 3 ? "A reason is required to reject" : undefined}
-          className="btn btn-danger flex-1"
+          icon={<X size={15} strokeWidth={2.8} />}
+          pendingLabel="Rejecting…"
         >
-          <X size={15} strokeWidth={2.8} />
           Reject
-        </button>
+        </SubmitButton>
       </div>
       <p className="text-center text-[11px]" style={{ color: "var(--c-ink-400)" }}>
         Rejections need a reason. §18 asks for decisions to be communicated clearly and promptly.

@@ -28,6 +28,7 @@ export type SessionUser = {
   lastWorkingDay: Date | null;
   isActive: boolean;
   mustChangePassword: boolean;
+  themePreference: string;
 };
 
 function randomToken(): string {
@@ -102,6 +103,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     lastWorkingDay: u.lastWorkingDay,
     isActive: u.isActive,
     mustChangePassword: u.mustChangePassword,
+    themePreference: u.themePreference,
   };
 }
 

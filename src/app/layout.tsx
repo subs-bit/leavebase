@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { ThemeScript } from "@/components/ThemeToggle";
+import { getSessionUser } from "@/lib/auth";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -28,11 +29,30 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // The signed-in employee's stored light/dark choice, applied to <html> on the server so it is
+  // already correct on the very first paint — including on a browser they have never used before.
+  // Taken from the session lookup that already happens — deliberately not a second query, since
+  // every extra database round trip is felt on a page that renders on the server.
+  let serverTheme: string | null = null;
+  try {
+    const session = await getSessionUser();
+    if (session && session.themePreference !== "SYSTEM") serverTheme = session.themePreference;
+  } catch {
+    // Never let a preference lookup stop the page rendering.
+  }
+
+  const attr = serverTheme === "DARK" ? "dark" : serverTheme === "LIGHT" ? "light" : undefined;
+
   return (
-    <html lang="en" className={jakarta.variable} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={jakarta.variable}
+      data-theme={attr}
+      suppressHydrationWarning
+    >
       <head>
-        <ThemeScript />
+        <ThemeScript serverTheme={serverTheme} />
       </head>
       <body>{children}</body>
     </html>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Loader2, Play, Trash2 } from "lucide-react";
 import {
@@ -80,29 +80,7 @@ export function PolicyForm({ cfg }: { cfg: PolicyConfig }) {
 
       <div>
         <p className="eyebrow mb-3">Working week</p>
-        <p className="label">Weekly offs</p>
-        <div className="flex flex-wrap gap-2">
-          {Array.from({ length: 7 }, (_, i) => (
-            <label
-              key={i}
-              className="cursor-pointer rounded-xl border px-3.5 py-2 text-[12.5px] font-bold transition-all has-[:checked]:border-[var(--lt-pl)] has-[:checked]:bg-[var(--lt-pl-tint)] has-[:checked]:text-[var(--lt-pl)]"
-              style={{ background: "var(--c-surface-2)", borderColor: "var(--c-border)", color: "var(--c-ink-500)" }}
-            >
-              <input
-                type="checkbox"
-                name="weeklyOffs"
-                value={i}
-                defaultChecked={cfg.weeklyOffs.includes(i)}
-                className="sr-only"
-              />
-              {weekdayName(i, true)}
-            </label>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px]" style={{ color: "var(--c-ink-400)" }}>
-          Drives which days count as working days, and therefore the §8 intervening-days rule.
-          Changing this does not recompute leave already approved.
-        </p>
+        <WeeklyOffPicker initial={cfg.weeklyOffs} />
       </div>
 
       <Result state={state} />
@@ -139,22 +117,29 @@ export function HolidayForm() {
   );
 }
 
+function RemoveHolidayButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-label="Remove holiday"
+      aria-busy={pending}
+      className="rounded-lg p-1.5 transition-colors hover:bg-[var(--c-danger-tint)]"
+      style={{ color: "var(--c-ink-400)" }}
+    >
+      {pending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+    </button>
+  );
+}
+
 export function RemoveHoliday({ holidayId }: { holidayId: string }) {
   const [state, action] = useActionState<SettingsState, FormData>(removeHolidayAction, {});
-  const { pending } = useFormStatus();
   if (state.ok) return <span className="text-[11px]" style={{ color: "var(--c-ink-400)" }}>Removed</span>;
   return (
     <form action={action}>
       <input type="hidden" name="holidayId" value={holidayId} />
-      <button
-        type="submit"
-        disabled={pending}
-        aria-label="Remove holiday"
-        className="rounded-lg p-1.5 transition-colors hover:bg-[var(--c-danger-tint)]"
-        style={{ color: "var(--c-ink-400)" }}
-      >
-        <Trash2 size={14} />
-      </button>
+      <RemoveHolidayButton />
     </form>
   );
 }
@@ -203,6 +188,89 @@ export function MaintenanceJobs() {
       <p className="text-[11px]" style={{ color: "var(--c-ink-400)" }}>
         Accrual and comp-off expiry also run automatically whenever someone signs in, so these
         buttons are for catching up after a gap or verifying a change.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Weekly-off day picker.
+ *
+ * Controlled by React state rather than a CSS `:checked` selector — the previous version set the
+ * colours with an inline style attribute, which always beats a class, so the selected state was
+ * invisible and the control looked broken. The real checkboxes stay in the DOM (visually hidden)
+ * so the form still submits the same `weeklyOffs` values without JavaScript.
+ */
+function WeeklyOffPicker({ initial }: { initial: number[] }) {
+  const [selected, setSelected] = useState<number[]>(initial);
+
+  const toggle = (day: number) =>
+    setSelected((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort(),
+    );
+
+  const workingDays = Array.from({ length: 7 }, (_, i) => i).filter((i) => !selected.includes(i));
+
+  return (
+    <div>
+      <p className="label">Which days is the studio closed?</p>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Weekly offs">
+        {Array.from({ length: 7 }, (_, i) => {
+          const off = selected.includes(i);
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => toggle(i)}
+              aria-pressed={off}
+              className="rounded-xl border px-3.5 py-2 text-[12.5px] font-bold transition-all duration-150"
+              style={
+                off
+                  ? {
+                      background: "var(--lt-pl-tint)",
+                      borderColor: "var(--lt-pl)",
+                      color: "var(--lt-pl)",
+                    }
+                  : {
+                      background: "var(--c-surface-2)",
+                      borderColor: "var(--c-border)",
+                      color: "var(--c-ink-400)",
+                    }
+              }
+            >
+              {weekdayName(i, true)}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* what the form actually submits */}
+      {selected.map((d) => (
+        <input key={d} type="hidden" name="weeklyOffs" value={d} />
+      ))}
+
+      <p className="mt-2.5 text-[12px]" style={{ color: "var(--c-ink-500)" }}>
+        {selected.length === 0 ? (
+          <span style={{ color: "var(--c-danger-ink)", fontWeight: 600 }}>
+            Pick at least one day off, or the studio never closes.
+          </span>
+        ) : selected.length === 7 ? (
+          <span style={{ color: "var(--c-danger-ink)", fontWeight: 600 }}>
+            At least one day must be a working day.
+          </span>
+        ) : (
+          <>
+            <strong style={{ color: "var(--c-ink-900)" }}>
+              {selected.map((d) => weekdayName(d)).join(" and ")}
+            </strong>{" "}
+            off &middot; working {workingDays.map((d) => weekdayName(d, true)).join(", ")}
+          </>
+        )}
+      </p>
+
+      <p className="mt-1.5 text-[11px] leading-snug" style={{ color: "var(--c-ink-400)" }}>
+        Drives which days count as working days, and therefore the §8 intervening-days rule.
+        Changing this does not recompute leave already approved.
       </p>
     </div>
   );

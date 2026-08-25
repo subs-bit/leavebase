@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { Suspense } from "react";
 import { MobileNav, Sidebar } from "@/components/Sidebar";
+import { NavProgress } from "@/components/NavProgress";
 import { canApprove as roleCanApprove, isHrOrAdmin } from "@/lib/policy/types";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -22,6 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
+      {/* useSearchParams needs a Suspense boundary during prerender */}
+      <Suspense fallback={null}>
+        <NavProgress />
+      </Suspense>
       <Sidebar
         user={{
           id: user.id,
