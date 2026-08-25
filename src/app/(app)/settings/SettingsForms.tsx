@@ -83,9 +83,72 @@ export function PolicyForm({ cfg }: { cfg: PolicyConfig }) {
         <WeeklyOffPicker initial={cfg.weeklyOffs} />
       </div>
 
+      <div>
+        <p className="eyebrow mb-3">§7 Accrual</p>
+        <AccrualCadencePicker initial={cfg.accrualCadence} />
+      </div>
+
       <Result state={state} />
       <Save />
     </form>
+  );
+}
+
+function AccrualCadencePicker({ initial }: { initial: string }) {
+  const [value, setValue] = useState(initial);
+
+  const options: { key: "QUARTERLY" | "ANNUAL"; title: string; desc: string }[] = [
+    {
+      key: "QUARTERLY",
+      title: "Quarterly (as written in the policy)",
+      desc: "A quarter of the entitlement is credited at the start of each of the four quarters. Someone confirmed mid-year starts Privileged Leave from their next quarter.",
+    },
+    {
+      key: "ANNUAL",
+      title: "All at once",
+      desc: "The whole pro-rata entitlement is credited the moment someone becomes eligible — at the start of the leave year for existing staff, or on joining (or confirmation, for Privileged Leave) for anyone arriving partway through.",
+    },
+  ];
+
+  return (
+    <div>
+      <p className="label">When leave is credited</p>
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        {options.map((o) => {
+          const active = value === o.key;
+          return (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setValue(o.key)}
+              aria-pressed={active}
+              className="rounded-xl border p-3.5 text-left transition-all duration-150"
+              style={
+                active
+                  ? { background: "var(--lt-pl-tint)", borderColor: "var(--lt-pl)" }
+                  : { background: "var(--c-surface-2)", borderColor: "var(--c-border)" }
+              }
+            >
+              <p
+                className="text-[13px] font-bold"
+                style={{ color: active ? "var(--lt-pl)" : "var(--c-ink-900)" }}
+              >
+                {o.title}
+              </p>
+              <p className="mt-1 text-[11.5px] leading-snug" style={{ color: "var(--c-ink-500)" }}>
+                {o.desc}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+      <input type="hidden" name="accrualCadence" value={value} />
+      <p className="mt-2.5 text-[11px] leading-snug" style={{ color: "var(--c-ink-400)" }}>
+        §7 states quarterly crediting — "all at once" is a deliberate departure you're choosing to
+        make. Switching does not retroactively rewrite leave already credited or approved; it takes
+        effect the next time accrual runs, which happens automatically whenever someone signs in.
+      </p>
+    </div>
   );
 }
 

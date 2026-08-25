@@ -198,11 +198,14 @@ async function BalanceStatement({
         </section>
 
         <section className="card p-5">
-          <SectionHeader eyebrow="§7 Accrual" title="How PL credits this year" />
+          <SectionHeader
+            eyebrow="§7 Accrual"
+            title={cfg.accrualCadence === "ANNUAL" ? "How PL is credited" : "How PL credits this year"}
+          />
           <ul className="mt-4 space-y-2">
             {schedule.map((line) => (
               <li
-                key={line.quarter.label}
+                key={line.period.label}
                 className="flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5"
                 style={{
                   background: line.credited ? "var(--lt-pl-tint)" : "var(--c-surface-3)",
@@ -214,12 +217,12 @@ async function BalanceStatement({
                     className="text-[12.5px] font-bold"
                     style={{ color: line.credited ? "var(--lt-pl)" : "var(--c-ink-500)" }}
                   >
-                    {line.quarter.label} · {fmtDate(line.quarter.start)}
+                    {line.period.label} · {fmtDate(line.period.start)}
                   </p>
                   <p className="text-[11px]" style={{ color: "var(--c-ink-400)" }}>
                     {line.credited ? "Credited" : "Scheduled"}
-                    {line.eligibleDays < line.quarterDays &&
-                      ` · ${line.eligibleDays} of ${line.quarterDays} days eligible`}
+                    {line.eligibleDays < line.periodDays &&
+                      ` · ${line.eligibleDays} of ${line.periodDays} days eligible`}
                   </p>
                 </div>
                 <span className="text-[13px] font-extrabold tnum" style={{ color: "var(--c-ink-900)" }}>
@@ -229,8 +232,10 @@ async function BalanceStatement({
             ))}
           </ul>
           <p className="mt-3 text-[11.5px] leading-relaxed" style={{ color: "var(--c-ink-400)" }}>
-            §7 credits leave quarterly on a pro-rata basis. Privileged Leave accrues only after
-            confirmation (§6).
+            {cfg.accrualCadence === "ANNUAL"
+              ? "The whole pro-rata entitlement is credited in one lump the moment you become eligible, rather than spread across the year — a setting an administrator has chosen (§7)."
+              : "§7 credits leave quarterly on a pro-rata basis."}{" "}
+            Privileged Leave accrues only after confirmation (§6).
           </p>
         </section>
       </div>

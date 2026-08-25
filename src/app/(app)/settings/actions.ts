@@ -44,6 +44,18 @@ export async function savePolicyAction(
   }
   next.weeklyOffs = weeklyOffs;
 
+  const accrualCadenceRaw = String(formData.get("accrualCadence") ?? current.accrualCadence);
+  if (accrualCadenceRaw !== "QUARTERLY" && accrualCadenceRaw !== "ANNUAL") {
+    return { error: "Pick a valid accrual schedule." };
+  }
+  if (current.accrualCadence !== accrualCadenceRaw) {
+    changes.push(
+      `Accrual schedule: ${current.accrualCadence === "ANNUAL" ? "all at once" : "quarterly"} → ` +
+        `${accrualCadenceRaw === "ANNUAL" ? "all at once" : "quarterly"}`,
+    );
+  }
+  next.accrualCadence = accrualCadenceRaw;
+
   if (changes.length === 0) return { ok: "Nothing changed." };
 
   await savePolicy(next);

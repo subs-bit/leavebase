@@ -61,8 +61,13 @@ export type PolicyConfig = {
   /** Weekly offs, 0=Sun … 6=Sat. */
   weeklyOffs: number[];
 
-  /** Accrual cadence. The policy states quarterly (§7). */
-  accrualCadence: "QUARTERLY" | "MONTHLY" | "ANNUAL";
+  /**
+   * §7 accrual cadence. The policy as written states quarterly — a quarter of the entitlement
+   * credited at the start of each quarter. "ANNUAL" is an administrator's deliberate departure
+   * from that: the whole pro-rata entitlement is credited in one lump the moment someone becomes
+   * eligible, rather than trickled in over the year.
+   */
+  accrualCadence: "QUARTERLY" | "ANNUAL";
 };
 
 export const DEFAULT_POLICY: PolicyConfig = {

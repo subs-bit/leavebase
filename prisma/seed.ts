@@ -321,9 +321,9 @@ async function main() {
     for (const type of ["CL", "SL", "PL"] as const) {
       for (const line of accrualSchedule(type, emp, LY, cfg, TODAY)) {
         if (!line.credited || line.amount <= 0) continue;
-        await postLedger(id, type, "ACCRUAL", line.amount, line.quarter.start,
+        await postLedger(id, type, "ACCRUAL", line.amount, line.period.start,
           type === "PL" && u.confirmDate ? "ACCRUAL.PL_ON_CONFIRM" : "ACCRUAL.QUARTERLY",
-          `${line.quarter.label} ${LY.label} pro-rata credit`);
+          `${line.period.label} ${LY.label} pro-rata credit`);
       }
     }
   }

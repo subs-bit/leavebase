@@ -5,7 +5,7 @@ import { dayKey, DayKey, fmtDate, fromKey, todayKey } from "@/lib/date";
 import { accrualGap } from "@/lib/policy/balance";
 import type { PolicyConfig } from "@/lib/policy/config";
 import {
-  accrualSchedule, computeCarryForward, currentQuarter, leaveYearOf, shiftLeaveYear,
+  accrualSchedule, computeCarryForward, currentAccrualPeriod, leaveYearOf, shiftLeaveYear,
   toEligibility,
 } from "@/lib/policy/leave-year";
 import { LEAVE_META } from "@/lib/policy/types";
@@ -17,11 +17,15 @@ import { expireCompOffs } from "./leave";
 const ACCRUING: LeaveType[] = ["CL", "SL", "PL"];
 
 /**
- * §7 — post any quarterly accrual the ledger is missing.
+ * §7 — post any accrual the ledger is missing, on whichever cadence the studio has chosen
+ * (Settings → Policy values → When leave is credited): quarterly as the policy states, or the
+ * whole pro-rata entitlement in one lump the moment someone becomes eligible.
  *
  * Idempotent by construction: it compares what *should* have accrued by `asOf` against what the
  * ledger already holds and posts only the difference. Running it twice in a day is a no-op, which
- * is what lets it be called on every sign-in rather than depending on a scheduler.
+ * is what lets it be called on every sign-in rather than depending on a scheduler. Changing the
+ * cadence takes effect on the next run — it does not retroactively rewrite what has already
+ * posted, so a mid-year switch does not create or destroy days that were already credited.
  */
 export async function runAccrual(
   opts: { userId?: string; asOf?: DayKey } = {},
@@ -38,7 +42,8 @@ export async function runAccrual(
     },
   });
 
-  const quarter = currentQuarter(ly, asOf);
+  const period = currentAccrualPeriod(ly, cfg, asOf);
+  const cadenceRuleId = cfg.accrualCadence === "ANNUAL" ? "ACCRUAL.ANNUAL" : "ACCRUAL.QUARTERLY";
   let posted = 0;
   let touched = 0;
 
@@ -61,9 +66,9 @@ export async function runAccrual(
           leaveType: type,
           entryKind: "ACCRUAL",
           amount: gap,
-          effectiveDate: fromKey(quarter.start),
-          ruleId: type === "PL" && u.confirmDate ? "ACCRUAL.PL_ON_CONFIRM" : "ACCRUAL.QUARTERLY",
-          note: `${quarter.label} ${ly.label} pro-rata credit`,
+          effectiveDate: fromKey(period.start),
+          ruleId: type === "PL" && u.confirmDate ? "ACCRUAL.PL_ON_CONFIRM" : cadenceRuleId,
+          note: `${period.label} ${ly.label} pro-rata credit`,
         },
       });
       posted++;

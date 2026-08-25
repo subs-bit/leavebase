@@ -114,8 +114,20 @@ export default async function PolicyPage() {
       body: (
         <>
           <p>
-            Leave is credited <Strong>at the start of each quarter</Strong>, pro-rated to the part
-            of the quarter you were eligible for it.
+            {cfg.accrualCadence === "ANNUAL" ? (
+              <>
+                Leave is credited <Strong>in full, the moment you become eligible</Strong> for the
+                leave year — at the start of the year for existing staff, or on your joining date
+                (or confirmation, for Privileged Leave) if you arrive partway through. An
+                administrator has chosen to credit the whole entitlement at once rather than
+                spreading it across the year, as the policy describes below.
+              </>
+            ) : (
+              <>
+                Leave is credited <Strong>at the start of each quarter</Strong>, pro-rated to the
+                part of the quarter you were eligible for it.
+              </>
+            )}
           </p>
           <p>
             On probation, only Casual and Sick Leave accrue. Privileged Leave is credited on

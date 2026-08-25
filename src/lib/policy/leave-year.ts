@@ -86,6 +86,36 @@ export function currentQuarter(ly: LeaveYear, asOf: DayKey = todayKey()): Quarte
   return qs.find((q) => diffDays(q.start, asOf) >= 0 && diffDays(asOf, q.end) >= 0) ?? qs[3];
 }
 
+/**
+ * The periods §7 accrual is divided into, per the studio's chosen cadence.
+ *
+ * "QUARTERLY" is the policy as written — four periods, each crediting a quarter of the grant.
+ * "ANNUAL" is one period spanning the whole leave year: the entire pro-rata entitlement is
+ * credited the moment someone becomes eligible, rather than trickled in over the year. Every
+ * caller downstream (accrualSchedule, the eligibility-window intersection, the balance rings) is
+ * written in terms of "a period", so switching cadence needs no other code to change — a single
+ * period covering the full year makes the same maths produce the full-year figure in one line.
+ */
+export function accrualPeriods(ly: LeaveYear, cfg: PolicyConfig): Quarter[] {
+  if (cfg.accrualCadence === "ANNUAL") {
+    return [{ index: 1, label: "Full year", start: ly.start, end: ly.end }];
+  }
+  return quartersOf(ly);
+}
+
+/** Whichever period `asOf` falls inside — used to date the ledger entry an accrual posts. */
+export function currentAccrualPeriod(
+  ly: LeaveYear,
+  cfg: PolicyConfig,
+  asOf: DayKey = todayKey(),
+): Quarter {
+  const periods = accrualPeriods(ly, cfg);
+  return (
+    periods.find((p) => diffDays(p.start, asOf) >= 0 && diffDays(asOf, p.end) >= 0) ??
+    periods[periods.length - 1]
+  );
+}
+
 // ── eligibility windows ───────────────────────────────────────────────────────
 
 export type EligibilityInput = {
@@ -120,12 +150,12 @@ export function eligibilityWindow(
 // ── accrual ───────────────────────────────────────────────────────────────────
 
 export type AccrualLine = {
-  quarter: Quarter;
-  /** Days of the quarter the employee was eligible. */
+  period: Quarter;
+  /** Days of the period the employee was eligible. */
   eligibleDays: number;
-  quarterDays: number;
+  periodDays: number;
   amount: number;
-  /** True once the quarter has begun — accrual credits at the *start* of a quarter (§7). */
+  /** True once the period has begun — accrual credits at the *start* of a period (§7). */
   credited: boolean;
 };
 
@@ -135,8 +165,93 @@ export function roundHalf(n: number): number {
 }
 
 /**
- * §7 ACCRUAL.QUARTERLY — the per-quarter pro-rata schedule for one leave type.
- * `asOf` decides which quarters have actually been credited.
+ * §7 — the quarterly accrual schedule for one leave type. This is the policy as written, and it
+ * is also the yardstick "ANNUAL" cadence measures itself against: switching cadence must change
+ * *when* leave lands, never *how much* is owed by year end, so the annual lump sum below is
+ * always computed by asking this function for the full-year total.
+ */
+function quarterlyAccrualLines(
+  type: LeaveType,
+  emp: EligibilityInput,
+  ly: LeaveYear,
+  cfg: PolicyConfig,
+  asOf: DayKey,
+): AccrualLine[] {
+  const annual = annualEntitlement(type, cfg);
+  const win = eligibilityWindow(type, emp, ly);
+  const quarters = quartersOf(ly);
+  const perQuarter = annual / quarters.length;
+
+  // Rounding is applied to the *cumulative* total rather than to each quarter, so the quarters
+  // always sum to the annual grant exactly. Rounding each quarter independently would credit
+  // 4 × roundHalf(15/4) = 16 days against an entitlement of 15.
+  let exactRunning = 0;
+  let roundedRunning = 0;
+
+  return quarters.map((period) => {
+    const periodDays = diffDays(period.start, period.end) + 1;
+    let eligibleDays = 0;
+    if (win) {
+      const from = maxKey(win.from, period.start);
+      const to = minKey(win.to, period.end);
+      eligibleDays = Math.max(0, diffDays(from, to) + 1);
+    }
+    exactRunning += (perQuarter * eligibleDays) / periodDays;
+    const cumulative = roundHalf(exactRunning);
+    const amount = roundHalf(cumulative - roundedRunning);
+    roundedRunning = cumulative;
+
+    return {
+      period,
+      eligibleDays,
+      periodDays,
+      amount,
+      credited: diffDays(period.start, asOf) >= 0,
+    };
+  });
+}
+
+/**
+ * "ANNUAL" cadence — the whole quarterly-equivalent total credited in one lump, the moment
+ * eligibility begins, instead of trickled in over four quarters. The total is identical to what
+ * `quarterlyAccrualLines` would sum to by year end; only the single credit date differs, and that
+ * date is the *employee's own* eligibility start (their joining or confirmation date), not a
+ * blanket 1 April — someone who joins in August has nothing to credit before August exists.
+ */
+function annualAccrualLines(
+  type: LeaveType,
+  emp: EligibilityInput,
+  ly: LeaveYear,
+  cfg: PolicyConfig,
+  asOf: DayKey,
+): AccrualLine[] {
+  const win = eligibilityWindow(type, emp, ly);
+  const total = roundHalf(
+    quarterlyAccrualLines(type, emp, ly, cfg, ly.end).reduce((s, l) => s + l.amount, 0),
+  );
+  const periodDays = diffDays(ly.start, ly.end) + 1;
+  const eligibleDays = win ? Math.max(0, diffDays(win.from, win.to) + 1) : 0;
+  const period: Quarter = {
+    index: 1,
+    label: "Full year",
+    start: win?.from ?? ly.start,
+    end: ly.end,
+  };
+
+  return [
+    {
+      period,
+      eligibleDays,
+      periodDays,
+      amount: total,
+      credited: !!win && diffDays(win.from, asOf) >= 0,
+    },
+  ];
+}
+
+/**
+ * §7 — the accrual schedule for one leave type, on whichever cadence the studio has chosen.
+ * `asOf` decides which lines have actually been credited.
  */
 export function accrualSchedule(
   type: LeaveType,
@@ -145,37 +260,9 @@ export function accrualSchedule(
   cfg: PolicyConfig,
   asOf: DayKey = todayKey(),
 ): AccrualLine[] {
-  const annual = annualEntitlement(type, cfg);
-  const win = eligibilityWindow(type, emp, ly);
-  const perQuarter = annual / 4;
-
-  // Rounding is applied to the *cumulative* total rather than to each quarter, so the quarters
-  // always sum to the annual grant exactly. Rounding each quarter independently would credit
-  // 4 × roundHalf(15/4) = 16 days against an entitlement of 15.
-  let exactRunning = 0;
-  let roundedRunning = 0;
-
-  return quartersOf(ly).map((quarter) => {
-    const quarterDays = diffDays(quarter.start, quarter.end) + 1;
-    let eligibleDays = 0;
-    if (win) {
-      const from = maxKey(win.from, quarter.start);
-      const to = minKey(win.to, quarter.end);
-      eligibleDays = Math.max(0, diffDays(from, to) + 1);
-    }
-    exactRunning += (perQuarter * eligibleDays) / quarterDays;
-    const cumulative = roundHalf(exactRunning);
-    const amount = roundHalf(cumulative - roundedRunning);
-    roundedRunning = cumulative;
-
-    return {
-      quarter,
-      eligibleDays,
-      quarterDays,
-      amount,
-      credited: diffDays(quarter.start, asOf) >= 0,
-    };
-  });
+  return cfg.accrualCadence === "ANNUAL"
+    ? annualAccrualLines(type, emp, ly, cfg, asOf)
+    : quarterlyAccrualLines(type, emp, ly, cfg, asOf);
 }
 
 /** Total accrued for a type up to `asOf`, i.e. the sum of quarters already begun. */

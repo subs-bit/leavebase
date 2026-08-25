@@ -6,7 +6,7 @@ import { buildBreakdown, makeContext } from "../src/lib/policy/calendar";
 import { DEFAULT_POLICY } from "../src/lib/policy/config";
 import { evaluateRequest } from "../src/lib/policy/evaluate";
 import {
-  accrualSchedule, accruedToDate, computeCarryForward, leaveYearOf, quartersOf,
+  accrualPeriods, accrualSchedule, accruedToDate, computeCarryForward, leaveYearOf, quartersOf,
 } from "../src/lib/policy/leave-year";
 import { summariseBalance } from "../src/lib/policy/balance";
 import type { BalanceSummary } from "../src/lib/policy/balance";
@@ -55,6 +55,41 @@ const midJoiner = { joinDate: "2026-10-01", confirmDate: "2027-01-01", lastWorki
 eq("Oct joiner CL pro-rata = 3", accruedToDate("CL", midJoiner, ly, cfg, "2027-03-31"), 3);
 eq("PL only from confirmation (Jan) = 4", accruedToDate("PL", midJoiner, ly, cfg, "2027-03-31"), 4);
 eq("quarters always sum to the annual grant", accrualSchedule("PL", veteran, ly, cfg, "2027-03-31").reduce((s, l) => s + l.amount, 0), 15);
+
+section("Accrual cadence — ANNUAL (§7 admin setting)");
+const annualCfg = { ...cfg, accrualCadence: "ANNUAL" as const };
+eq("annual cadence: one period spanning the whole year", accrualPeriods(ly, annualCfg).length, 1);
+eq("annual cadence: full-year PL still = 15", accruedToDate("PL", veteran, ly, annualCfg, "2027-03-31"), 15);
+eq(
+  "annual cadence: whole entitlement lands the day it starts, not spread out",
+  accruedToDate("PL", veteran, ly, annualCfg, "2026-04-01"),
+  15,
+);
+eq(
+  "annual cadence: mid-year confirmation still gets the full remaining pro-rata in one lump",
+  accruedToDate("PL", midJoiner, ly, annualCfg, "2027-03-31"),
+  accruedToDate("PL", midJoiner, ly, cfg, "2027-03-31"), // same total as quarterly by year end — only the timing differs
+);
+eq(
+  "annual cadence: nothing credited before the eligible period begins",
+  accruedToDate("PL", midJoiner, ly, annualCfg, "2026-12-31"),
+  0,
+);
+eq(
+  "quarterly cadence unaffected by the ANNUAL branch existing",
+  accrualPeriods(ly, cfg).length,
+  4,
+);
+eq(
+  "annual cadence: the full lump lands on confirmation day itself, not the day after",
+  accruedToDate("PL", midJoiner, ly, annualCfg, "2027-01-01"),
+  accruedToDate("PL", midJoiner, ly, cfg, "2027-03-31"),
+);
+eq(
+  "annual cadence: entitlementAnnual-style full-year total matches quarterly's — cadence is timing only",
+  accrualSchedule("CL", midJoiner, ly, annualCfg, ly.end).reduce((s, l) => s + l.amount, 0),
+  accrualSchedule("CL", midJoiner, ly, cfg, ly.end).reduce((s, l) => s + l.amount, 0),
+);
 
 section("Carry forward (§4/§5/§6)");
 eq("CL never carries", computeCarryForward("CL", 4, cfg).carried, 0);
