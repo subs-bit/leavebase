@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { fmtDays, fmtRange, timeAgo } from "@/lib/date";
-import { Avatar, leaveInk, leaveName, StatusChip } from "./ui/primitives";
+import { Avatar, Chip, leaveInk, leaveName, StatusChip } from "./ui/primitives";
 
 export type RequestRowData = {
   id: string;
@@ -15,6 +15,7 @@ export type RequestRowData = {
   appliedAt: string;
   halfDay?: string;
   isLop?: boolean;
+  lopDays?: number;
   user?: { name: string; avatarHue: number; designation?: string };
 };
 
@@ -59,6 +60,11 @@ export function RequestRow({
           <span className="text-[12px]" style={{ color: "var(--c-ink-400)" }}>
             {r.code}
           </span>
+          {r.isLop && !!r.lopDays && (
+            <Chip tone="warning" size="sm">
+              {r.lopDays === r.chargedDays ? "Unpaid" : `${fmtDays(r.lopDays)} unpaid`}
+            </Chip>
+          )}
         </div>
         <p className="mt-0.5 truncate text-[12.5px]" style={{ color: "var(--c-ink-500)" }}>
           {fmtRange(r.startDate, r.endDate)}

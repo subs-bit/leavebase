@@ -143,6 +143,8 @@ export default async function RequestsPage({
                       reason: r.reason,
                       appliedAt: r.appliedAt.toISOString(),
                       halfDay: r.halfDay,
+                      isLop: r.isLop,
+                      lopDays: r.lopDays,
                     }}
                   />
                 ))}

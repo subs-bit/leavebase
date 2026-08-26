@@ -347,6 +347,8 @@ export default async function DashboardPage() {
                             reason: a.request.reason,
                             appliedAt: a.request.appliedAt.toISOString(),
                             halfDay: a.request.halfDay,
+                            isLop: a.request.isLop,
+                            lopDays: a.request.lopDays,
                             user: a.request.user,
                           }}
                         />
@@ -396,6 +398,8 @@ export default async function DashboardPage() {
                           reason: r.reason,
                           appliedAt: r.appliedAt.toISOString(),
                           halfDay: r.halfDay,
+                          isLop: r.isLop,
+                          lopDays: r.lopDays,
                         }}
                       />
                     ))}

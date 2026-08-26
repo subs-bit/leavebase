@@ -218,6 +218,8 @@ export async function FounderDashboard({ user }: { user: SessionUser }) {
                         reason: r.reason,
                         appliedAt: r.appliedAt.toISOString(),
                         halfDay: r.halfDay,
+                        isLop: r.isLop,
+                        lopDays: r.lopDays,
                         user: r.user,
                       }}
                     />
