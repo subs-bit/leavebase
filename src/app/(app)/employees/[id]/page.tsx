@@ -373,7 +373,7 @@ export default async function EmployeeDetailPage({
                       </div>
                       <span
                         className="shrink-0 text-[13px] font-extrabold tnum"
-                        style={{ color: isCredit(e.entryKind) ? "var(--c-success-ink)" : "var(--c-ink-900)" }}
+                        style={{ color: isCredit(e.entryKind, e.amount) ? "var(--c-success-ink)" : "var(--c-ink-900)" }}
                       >
                         {e.amount > 0 ? "+" : ""}
                         {fmtDays(e.amount)}

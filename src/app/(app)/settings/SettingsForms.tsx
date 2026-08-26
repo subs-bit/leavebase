@@ -145,8 +145,10 @@ function AccrualCadencePicker({ initial }: { initial: string }) {
       <input type="hidden" name="accrualCadence" value={value} />
       <p className="mt-2.5 text-[11px] leading-snug" style={{ color: "var(--c-ink-400)" }}>
         §7 states quarterly crediting — "all at once" is a deliberate departure you're choosing to
-        make. Switching does not retroactively rewrite leave already credited or approved; it takes
-        effect the next time accrual runs, which happens automatically whenever someone signs in.
+        make. The change takes effect the next time accrual runs, which happens automatically
+        whenever someone signs in: switching up credits the difference immediately, and switching
+        back down corrects any unused surplus — it never claws back leave that's already been
+        approved.
       </p>
     </div>
   );

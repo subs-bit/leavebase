@@ -104,8 +104,14 @@ export function availableOf(all: BalanceSummary[], type: LeaveType): number {
 }
 
 /**
- * What the quarterly accrual *should* have credited by now, versus what the ledger actually holds.
- * The difference is what `runAccrual` will post — this makes the accrual job idempotent.
+ * What accrual *should* have credited by now, versus what the ledger actually holds. The
+ * difference is what `runAccrual` will post — this makes the accrual job idempotent.
+ *
+ * Usually positive (there's more to credit). It can go negative when an administrator switches
+ * §7 cadence from "all at once" back to quarterly part-way through the year — the ledger already
+ * holds the full annual lump, which is now more than quarterly-to-date says is owed. That surplus
+ * gets clawed back, but never past what's still unused: a correction can shrink an unused
+ * surplus, it must never turn leave someone has already had approved into a deficit.
  */
 export function accrualGap(
   leaveType: LeaveType,
@@ -122,7 +128,11 @@ export function accrualGap(
       .filter((e) => e.leaveType === leaveType && e.entryKind === "ACCRUAL")
       .reduce((s, e) => s + e.amount, 0),
   );
-  return roundHalf(expected - posted);
+  const gap = roundHalf(expected - posted);
+  if (gap >= 0) return gap;
+
+  const available = summariseBalance(leaveType, entries, emp, ly, cfg, asOf).available;
+  return roundHalf(Math.max(gap, -Math.max(available, 0)));
 }
 
 /** Group ledger entries for the statement view — newest first. */
@@ -148,6 +158,10 @@ export const LEDGER_KIND_LABEL: Record<string, string> = {
   CONVERSION: "Converted",
 };
 
-export function isCredit(kind: string): boolean {
-  return CREDIT_KINDS.has(kind);
+/**
+ * Most kinds are credits by nature, but a cadence-correction ACCRUAL entry (see `accrualGap`) is
+ * a clawback wearing a credit kind's clothes — the sign decides, not just the kind.
+ */
+export function isCredit(kind: string, amount: number): boolean {
+  return CREDIT_KINDS.has(kind) && amount >= 0;
 }

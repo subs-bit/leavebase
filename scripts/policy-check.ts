@@ -8,7 +8,7 @@ import { evaluateRequest } from "../src/lib/policy/evaluate";
 import {
   accrualPeriods, accrualSchedule, accruedToDate, computeCarryForward, leaveYearOf, quartersOf,
 } from "../src/lib/policy/leave-year";
-import { summariseBalance } from "../src/lib/policy/balance";
+import { accrualGap, summariseBalance } from "../src/lib/policy/balance";
 import type { BalanceSummary } from "../src/lib/policy/balance";
 
 let pass = 0, fail = 0;
@@ -89,6 +89,42 @@ eq(
   "annual cadence: entitlementAnnual-style full-year total matches quarterly's — cadence is timing only",
   accrualSchedule("CL", midJoiner, ly, annualCfg, ly.end).reduce((s, l) => s + l.amount, 0),
   accrualSchedule("CL", midJoiner, ly, cfg, ly.end).reduce((s, l) => s + l.amount, 0),
+);
+
+section("Accrual cadence correction — switching back down (§7)");
+const annualLedger = [
+  { leaveType: "PL", entryKind: "ACCRUAL", amount: 15, effectiveDate: "2026-04-01" },
+];
+eq(
+  "switching all-at-once → quarterly claws back the unused surplus",
+  accrualGap("PL", annualLedger, veteran, ly, cfg, "2026-08-12"),
+  -7.5, // quarterly-to-date at Q2 is 7.5 (4 + 3.5); the ledger holds the full 15 from the annual lump
+);
+
+const partlyUsedLedger = [
+  { leaveType: "PL", entryKind: "ACCRUAL", amount: 15, effectiveDate: "2026-04-01" },
+  { leaveType: "PL", entryKind: "AVAIL", amount: -10, effectiveDate: "2026-06-01" },
+];
+eq(
+  "the correction never dips below what's already been used",
+  accrualGap("PL", partlyUsedLedger, veteran, ly, cfg, "2026-08-12"),
+  -5, // only 5 is unused, so that's the most that can be clawed back
+);
+
+const fullyUsedLedger = [
+  { leaveType: "PL", entryKind: "ACCRUAL", amount: 15, effectiveDate: "2026-04-01" },
+  { leaveType: "PL", entryKind: "AVAIL", amount: -15, effectiveDate: "2026-06-01" },
+];
+eq(
+  "nothing is clawed back once it's all been used",
+  accrualGap("PL", fullyUsedLedger, veteran, ly, cfg, "2026-08-12"),
+  0,
+);
+
+eq(
+  "switching quarterly → all-at-once still credits the full difference immediately, as before",
+  accrualGap("PL", [], veteran, ly, annualCfg, "2026-08-12"),
+  15,
 );
 
 section("Carry forward (§4/§5/§6)");

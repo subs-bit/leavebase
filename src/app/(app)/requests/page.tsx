@@ -253,7 +253,7 @@ async function BalanceStatement({
           <div className="mt-4 divide-line">
             {sortLedger(entries as never).map((e) => {
               const entry = e as unknown as (typeof entries)[number];
-              const credit = isCredit(entry.entryKind);
+              const credit = isCredit(entry.entryKind, entry.amount);
               return (
                 <div key={entry.id} className="flex items-start gap-3.5 px-5 py-3.5">
                   <span

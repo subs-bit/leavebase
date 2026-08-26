@@ -23,9 +23,11 @@ const ACCRUING: LeaveType[] = ["CL", "SL", "PL"];
  *
  * Idempotent by construction: it compares what *should* have accrued by `asOf` against what the
  * ledger already holds and posts only the difference. Running it twice in a day is a no-op, which
- * is what lets it be called on every sign-in rather than depending on a scheduler. Changing the
- * cadence takes effect on the next run — it does not retroactively rewrite what has already
- * posted, so a mid-year switch does not create or destroy days that were already credited.
+ * is what lets it be called on every sign-in rather than depending on a scheduler. Switching
+ * cadence down (e.g. "all at once" back to quarterly) can leave the ledger holding more than
+ * quarterly-to-date now says is owed — the difference is corrected on the next run too, capped so
+ * it only ever claws back an unused surplus, never leave that's already been approved (see
+ * `accrualGap`).
  */
 export async function runAccrual(
   opts: { userId?: string; asOf?: DayKey } = {},
@@ -57,7 +59,7 @@ export async function runAccrual(
     let userPosted = false;
     for (const type of ACCRUING) {
       const gap = accrualGap(type, entries, emp, ly, cfg, asOf);
-      if (gap <= 0) continue;
+      if (gap === 0) continue;
 
       await db.leaveLedger.create({
         data: {
@@ -67,8 +69,16 @@ export async function runAccrual(
           entryKind: "ACCRUAL",
           amount: gap,
           effectiveDate: fromKey(period.start),
-          ruleId: type === "PL" && u.confirmDate ? "ACCRUAL.PL_ON_CONFIRM" : cadenceRuleId,
-          note: `${period.label} ${ly.label} pro-rata credit`,
+          ruleId:
+            gap < 0
+              ? "ACCRUAL.CADENCE_CORRECTION"
+              : type === "PL" && u.confirmDate
+                ? "ACCRUAL.PL_ON_CONFIRM"
+                : cadenceRuleId,
+          note:
+            gap < 0
+              ? `Cadence switched back to quarterly — correcting the over-credited balance from "all at once" (§7)`
+              : `${period.label} ${ly.label} pro-rata credit`,
         },
       });
       posted++;
