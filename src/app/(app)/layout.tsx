@@ -47,7 +47,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
         <div className="h-20 lg:hidden" />
       </div>
-      <MobileNav canApprove={approver} pendingCount={pendingCount} />
+      <MobileNav
+        canApprove={approver}
+        isHr={isHrOrAdmin(user.role)}
+        isAdmin={isAdministrator(user.role)}
+        isFounder={isFounder(user.role)}
+        pendingCount={pendingCount}
+      />
     </div>
   );
 }

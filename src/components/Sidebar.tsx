@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   BarChart3, CalendarDays, ChevronLeft, FileText, Gift, LayoutDashboard, LogOut,
-  ScrollText, Settings, ShieldCheck, Users, UsersRound,
+  Menu, ScrollText, Settings, ShieldCheck, User, Users, UsersRound, X,
 } from "lucide-react";
 import { LeaveBaseLogo, PrismixMark } from "./ui/Logo";
 import { Avatar } from "./ui/primitives";
@@ -219,50 +219,175 @@ function NavGroup({
   );
 }
 
-/** Below `lg` the sidebar becomes a bottom tab bar. */
+/**
+ * Below `lg` the sidebar becomes a bottom tab bar. Only the handful of most-used pages fit as
+ * tabs — everything else the desktop Sidebar can reach (comp-off, a non-approver's calendar,
+ * team, employees, reports, policy, settings) lives behind the trailing "More" tab instead of
+ * disappearing on mobile.
+ */
 export function MobileNav({
-  canApprove, pendingCount = 0,
+  canApprove, isHr, isAdmin, isFounder = false, pendingCount = 0,
 }: {
   canApprove: boolean;
+  isHr: boolean;
+  isAdmin: boolean;
+  isFounder?: boolean;
   pendingCount?: number;
 }) {
   const pathname = usePathname();
-  const items: Item[] = [
-    { href: "/", label: "Home", icon: LayoutDashboard },
-    { href: "/apply", label: "Apply", icon: FileText },
-    { href: "/requests", label: "Requests", icon: ScrollText },
-    ...(canApprove
-      ? [{ href: "/approvals", label: "Approvals", icon: ShieldCheck, badge: pendingCount }]
-      : [{ href: "/calendar", label: "Calendar", icon: CalendarDays }]),
-    { href: "/profile", label: "Profile", icon: Users },
-  ];
+  const [open, setOpen] = useState(false);
+
+  const items: Item[] = isFounder
+    ? [
+        { href: "/", label: "Home", icon: LayoutDashboard },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
+      ]
+    : [
+        { href: "/", label: "Home", icon: LayoutDashboard },
+        { href: "/apply", label: "Apply", icon: FileText },
+        { href: "/requests", label: "Requests", icon: ScrollText },
+        ...(canApprove
+          ? [{ href: "/approvals", label: "Approvals", icon: ShieldCheck, badge: pendingCount }]
+          : [{ href: "/calendar", label: "Calendar", icon: CalendarDays }]),
+      ];
+
+  const pinned = new Set(items.map((i) => i.href));
+  const more: Item[] = [
+    ...(!isFounder ? [{ href: "/comp-off", label: "Comp-off", icon: Gift }] : []),
+    ...(canApprove ? [{ href: "/team", label: "My team", icon: UsersRound }] : []),
+    ...(isHr ? [{ href: "/employees", label: "Employees", icon: Users }] : []),
+    ...(isHr ? [{ href: "/reports", label: "Reports", icon: BarChart3 }] : []),
+    { href: "/policy", label: "Leave policy", icon: ScrollText },
+    ...(isAdmin ? [{ href: "/settings", label: "Settings", icon: Settings }] : []),
+  ].filter((i) => !pinned.has(i.href));
+
+  const moreActive = more.some((i) => pathname.startsWith(i.href)) || pathname.startsWith("/profile");
 
   return (
-    <nav
-      className="glass fixed bottom-0 left-0 right-0 z-40 flex border-t lg:hidden"
-      style={{ borderColor: "var(--c-border)", paddingBottom: "env(safe-area-inset-bottom)" }}
-    >
-      {items.map((item) => {
-        const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="relative flex flex-1 flex-col items-center gap-1 py-2.5"
-            style={{ color: active ? "var(--lt-pl)" : "var(--c-ink-400)" }}
-          >
-            <Icon size={19} strokeWidth={active ? 2.4 : 2} />
-            <span className="text-[10px] font-bold">{item.label}</span>
-            {!!item.badge && item.badge > 0 && (
-              <span
-                className="absolute right-[26%] top-1.5 h-1.5 w-1.5 rounded-full"
-                style={{ background: "var(--c-warning)" }}
-              />
-            )}
-          </Link>
-        );
-      })}
-    </nav>
+    <>
+      {open && (
+        <div
+          className="fixed inset-0 z-40 lg:hidden"
+          style={{ background: "rgba(0,0,0,0.4)" }}
+          onClick={() => setOpen(false)}
+        />
+      )}
+      <nav
+        className="glass fixed bottom-0 left-0 right-0 z-40 flex border-t lg:hidden"
+        style={{ borderColor: "var(--c-border)", paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {items.map((item) => {
+          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="relative flex flex-1 flex-col items-center gap-1 py-2.5"
+              style={{ color: active ? "var(--lt-pl)" : "var(--c-ink-400)" }}
+            >
+              <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+              <span className="text-[10px] font-bold">{item.label}</span>
+              {!!item.badge && item.badge > 0 && (
+                <span
+                  className="absolute right-[26%] top-1.5 h-1.5 w-1.5 rounded-full"
+                  style={{ background: "var(--c-warning)" }}
+                />
+              )}
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-label="More"
+          aria-expanded={open}
+          className="relative flex flex-1 flex-col items-center gap-1 py-2.5"
+          style={{ color: open || moreActive ? "var(--lt-pl)" : "var(--c-ink-400)" }}
+        >
+          {open ? <X size={19} strokeWidth={2.4} /> : <Menu size={19} strokeWidth={moreActive ? 2.4 : 2} />}
+          <span className="text-[10px] font-bold">More</span>
+        </button>
+      </nav>
+
+      {open && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-50 max-h-[75vh] overflow-y-auto rounded-t-2xl border-t lg:hidden"
+          style={{
+            background: "var(--c-surface)",
+            borderColor: "var(--c-border)",
+            paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
+            boxShadow: "var(--sh-lift)",
+          }}
+        >
+          <div className="flex items-center justify-between px-5 pb-2 pt-4">
+            <p className="text-[15px] font-bold" style={{ color: "var(--c-ink-900)" }}>More</p>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close menu"
+              className="flex h-8 w-8 items-center justify-center rounded-full"
+              style={{ background: "var(--c-ink-100)", color: "var(--c-ink-500)" }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <ul className="space-y-0.5 px-3">
+            {more.map((item) => {
+              const active = pathname.startsWith(item.href);
+              const Icon = item.icon;
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-3 text-[14px] font-semibold"
+                    style={active ? { background: "var(--lt-pl-tint)", color: "var(--lt-pl)" } : { color: "var(--c-ink-700)" }}
+                  >
+                    <Icon size={18} strokeWidth={active ? 2.4 : 2} />
+                    <span className="flex-1">{item.label}</span>
+                    {!!item.badge && item.badge > 0 && (
+                      <span
+                        className="rounded-full px-1.5 py-0.5 text-[10.5px] font-extrabold"
+                        style={{ background: "var(--c-warning)", color: "#fff" }}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="mt-2 border-t px-3 pt-2" style={{ borderColor: "var(--c-border)" }}>
+            <Link
+              href="/profile"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-[14px] font-semibold"
+              style={
+                pathname.startsWith("/profile")
+                  ? { background: "var(--lt-pl-tint)", color: "var(--lt-pl)" }
+                  : { color: "var(--c-ink-700)" }
+              }
+            >
+              <User size={18} strokeWidth={pathname.startsWith("/profile") ? 2.4 : 2} />
+              Profile
+            </Link>
+            <form action="/api/logout" method="post">
+              <button
+                type="submit"
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-[14px] font-semibold"
+                style={{ color: "var(--c-ink-500)" }}
+              >
+                <LogOut size={18} />
+                Sign out
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
