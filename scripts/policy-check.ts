@@ -187,7 +187,7 @@ const emp = {
   lastWorkingDay: null, status: "CONFIRMED",
 };
 const bal = (t: string, available: number): BalanceSummary => ({
-  leaveType: t as never, opening: 0, accrued: available, earned: 0, adjusted: 0,
+  leaveType: t as never, opening: 0, accrued: available, earned: 0, adjusted: 0, converted: 0,
   used: 0, restored: 0, lapsed: 0, available, granted: available, entitlementAnnual: available,
 });
 const base = {
@@ -304,6 +304,30 @@ const summary = summariseBalance("PL", [
 eq("ledger sums to available", summary.available, 12.5);
 eq("used tracked separately", summary.used, 5);
 eq("other types excluded", summary.accrued, 7.5);
+
+section("Granted excludes reversals — cancelling or reassigning never inflates the ring's denominator");
+const cancelledInFull = summariseBalance("CL", [
+  { leaveType: "CL", entryKind: "ACCRUAL", amount: 3, effectiveDate: "2026-04-01" },
+  { leaveType: "CL", entryKind: "AVAIL", amount: -3, effectiveDate: "2026-08-01" },
+  { leaveType: "CL", entryKind: "CANCEL_CREDIT", amount: 3, effectiveDate: "2026-08-05" },
+], veteran, ly, cfg, "2026-08-12");
+eq("cancelling in full restores available to exactly what was accrued", cancelledInFull.available, 3);
+eq("granted stays at the real entitlement, not accrued + the credit-back", cancelledInFull.granted, 3);
+
+const reassignedAway = summariseBalance("CL", [
+  { leaveType: "CL", entryKind: "ACCRUAL", amount: 6, effectiveDate: "2026-04-01" },
+  { leaveType: "CL", entryKind: "AVAIL", amount: -3, effectiveDate: "2026-08-01" },
+  { leaveType: "CL", entryKind: "CONVERSION", amount: 3, effectiveDate: "2026-08-05" }, // moved out to SL
+], veteran, ly, cfg, "2026-08-12");
+eq("reassigning a debit away restores this type fully", reassignedAway.available, 6);
+eq("granted on the type it left is unaffected by the reversal", reassignedAway.granted, 6);
+
+const reassignedIn = summariseBalance("SL", [
+  { leaveType: "SL", entryKind: "ACCRUAL", amount: 9, effectiveDate: "2026-04-01" },
+  { leaveType: "SL", entryKind: "CONVERSION", amount: -3, effectiveDate: "2026-08-05" }, // moved in from CL
+], veteran, ly, cfg, "2026-08-12");
+eq("reassigning a debit in reduces available like any other debit", reassignedIn.available, 6);
+eq("granted on the type it lands on is unaffected by the recharge", reassignedIn.granted, 9);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

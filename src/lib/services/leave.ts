@@ -5,9 +5,9 @@ import { addDaysKey, dayKey, DayKey, fmtDate, fmtRange, fromKey, pluralDays, tod
 import { evaluateRequest, Evaluation } from "@/lib/policy/evaluate";
 import { leaveYearOf, roundHalf } from "@/lib/policy/leave-year";
 import { currentStep, statusForProgress } from "@/lib/policy/routing";
-import { canOverrideDecisions, LEAVE_META } from "@/lib/policy/types";
+import { canOverrideDecisions, LEAVE_META, NON_CLUBBABLE } from "@/lib/policy/types";
 import type { HalfDay, LeaveType } from "@/lib/policy/types";
-import { getCompOffAvailable, loadEvalBundle } from "./context";
+import { getBalances, getCompOffAvailable, getPolicy, loadEvalBundle } from "./context";
 import { audit, notify } from "./activity";
 
 export type DraftRequest = {
@@ -425,6 +425,106 @@ export async function cancelRequest(
       link: `/requests/${requestId}`,
     });
   }
+
+  return { ok: true };
+}
+
+/**
+ * Administrative correction — reclassify an approved request from one pooled leave type to
+ * another (Casual, Sick or Privileged only; comp-off is dated credits rather than a pool, and
+ * maternity/paternity/LOP have their own eligibility and day-count rules, so none of them are
+ * safe to swap this way). For a request marked as one type by mistake — or one that was originally
+ * charged elsewhere under §5's sick-leave doc-failure rule and should be put right.
+ *
+ * Reverses exactly what's currently charged (whichever type that actually is — it may already
+ * differ from `request.leaveType`) with a CONVERSION entry, then charges the new type from
+ * scratch against its *own* balance. §13 still applies: if the new type doesn't have enough
+ * balance, the shortfall becomes Loss of Pay rather than blocking the change, the same as any
+ * other request.
+ */
+export async function reassignLeaveType(
+  requestId: string,
+  newType: LeaveType,
+  actorId: string,
+  reason: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const request = await db.leaveRequest.findUnique({
+    where: { id: requestId },
+    include: { user: { select: { name: true } } },
+  });
+  if (!request) return { ok: false, error: "Request not found." };
+  if (request.status !== "APPROVED") {
+    return { ok: false, error: "Only approved leave can be reassigned to a different type." };
+  }
+  const oldType = request.leaveType as LeaveType;
+  if (!NON_CLUBBABLE.includes(newType) || !NON_CLUBBABLE.includes(oldType)) {
+    return { ok: false, error: "Only Casual, Sick and Privileged Leave can be reassigned this way." };
+  }
+  if (newType === oldType) return { ok: false, error: "That's already its type." };
+  if (!reason.trim()) return { ok: false, error: "A reason is required." };
+
+  const cfg = await getPolicy();
+  const start = dayKey(request.startDate);
+  const end = dayKey(request.endDate);
+  const ly = leaveYearOf(start, cfg);
+
+  const currentDebits = await db.leaveLedger.findMany({ where: { requestId, entryKind: "AVAIL" } });
+
+  // §13 — recompute against the new type's own balance; a shortfall becomes LOP, same as any request.
+  const balances = await getBalances(request.userId, cfg, ly);
+  const available = balances.find((b) => b.leaveType === newType)?.available ?? 0;
+  const lopDays = Math.max(0, roundHalf(request.chargedDays - available));
+  const payable = roundHalf(request.chargedDays - lopDays);
+
+  await db.$transaction(async (tx) => {
+    for (const d of currentDebits) {
+      await tx.leaveLedger.create({
+        data: {
+          userId: request.userId, leaveYear: d.leaveYear, leaveType: d.leaveType,
+          entryKind: "CONVERSION", amount: Math.abs(d.amount),
+          effectiveDate: new Date(), requestId, actorId,
+          ruleId: "REASSIGN.OUT",
+          note: `Reassigned to ${LEAVE_META[newType].name} — ${reason.trim()}`,
+        },
+      });
+    }
+    if (payable > 0) {
+      await tx.leaveLedger.create({
+        data: {
+          userId: request.userId, leaveYear: ly.label, leaveType: newType,
+          entryKind: "CONVERSION", amount: -payable,
+          effectiveDate: request.startDate, requestId, actorId,
+          ruleId: "REASSIGN.IN",
+          note: `Reassigned from ${LEAVE_META[oldType].name} — ${fmtRange(start, end)}`,
+        },
+      });
+    }
+    await tx.leaveRequest.update({
+      where: { id: requestId },
+      data: { leaveType: newType, lopDays, isLop: lopDays > 0 },
+    });
+  });
+
+  await audit({
+    actorId,
+    action: "REQUEST_REASSIGNED",
+    entity: "LeaveRequest",
+    entityId: requestId,
+    summary:
+      `Reassigned ${request.code} for ${request.user.name} from ${LEAVE_META[oldType].name} to ` +
+      `${LEAVE_META[newType].name}${lopDays > 0 ? ` — ${pluralDays(lopDays)} now unpaid under §13` : ""} — ${reason.trim()}`,
+    meta: { oldType, newType, lopDays },
+  });
+
+  await notify({
+    userId: request.userId,
+    kind: "APPROVED",
+    title: `Your ${LEAVE_META[oldType].name} was changed to ${LEAVE_META[newType].name}`,
+    body:
+      `${fmtRange(start, end)} — ${reason.trim()}.` +
+      (lopDays > 0 ? ` ${pluralDays(lopDays)} is now unpaid under §13.` : ""),
+    link: `/requests/${requestId}`,
+  });
 
   return { ok: true };
 }

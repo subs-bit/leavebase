@@ -5,14 +5,15 @@ import { canViewUser, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { PageBody, PageHeader } from "@/components/PageHeader";
 import { ApprovalTimeline } from "@/components/ApprovalTimeline";
-import { CancelPanel, DecisionPanel } from "@/components/DecisionPanel";
+import { CancelPanel, DecisionPanel, ReassignPanel } from "@/components/DecisionPanel";
 import {
   Avatar, Chip, leaveInk, leaveTint, LeaveChip, PolicyNote, SectionHeader, StatusChip,
 } from "@/components/ui/primitives";
 import {
   dayKey, fmtDate, fmtDateFull, fmtDateTime, fmtDays, fmtRange, pluralDays, relativeDays, todayKey,
 } from "@/lib/date";
-import { HALF_DAY_LABEL, LEAVE_META, isHrOrAdmin } from "@/lib/policy/types";
+import { HALF_DAY_LABEL, LEAVE_META, NON_CLUBBABLE, isAdministrator, isHrOrAdmin } from "@/lib/policy/types";
+import type { LeaveType } from "@/lib/policy/types";
 import type { Finding } from "@/lib/policy/evaluate";
 import { getBalances, getPolicy } from "@/lib/services/context";
 import { leaveYearOf } from "@/lib/policy/leave-year";
@@ -65,6 +66,10 @@ export default async function RequestDetailPage({
     (isOwn && (isOpen || (request.status === "APPROVED" && start > today))) ||
     (request.status === "APPROVED" &&
       (request.approvals.some((a) => a.approverId === viewer.id) || isHrOrAdmin(viewer.role)));
+  const canReassign =
+    isAdministrator(viewer.role) &&
+    request.status === "APPROVED" &&
+    NON_CLUBBABLE.includes(request.leaveType as LeaveType);
 
   const snapshot = safeJson(request.policySnapshot);
   const findings: Finding[] = Array.isArray(snapshot.findings) ? (snapshot.findings as Finding[]) : [];
@@ -311,22 +316,30 @@ export default async function RequestDetailPage({
             )}
 
             {/* actions */}
-            {(canDecide || canCancel) && (
+            {(canDecide || canCancel || canReassign) && (
               <section className="card p-5">
                 <p className="eyebrow mb-3.5">
                   {canDecide ? "Your decision" : isOwn ? "Change of plan" : "Manage"}
                 </p>
                 {canDecide ? (
                   <DecisionPanel requestId={request.id} />
-                ) : (
+                ) : canCancel ? (
                   <CancelPanel
                     requestId={request.id}
                     mode={isOwn && isOpen ? "withdraw" : "cancel"}
                   />
-                )}
+                ) : null}
                 {canDecide && canCancel && (
                   <div className="mt-4 border-t pt-4" style={{ borderColor: "var(--c-border)" }}>
                     <CancelPanel requestId={request.id} mode="cancel" />
+                  </div>
+                )}
+                {canReassign && (
+                  <div
+                    className={(canDecide || canCancel) ? "mt-4 border-t pt-4" : ""}
+                    style={(canDecide || canCancel) ? { borderColor: "var(--c-border)" } : undefined}
+                  >
+                    <ReassignPanel requestId={request.id} currentType={request.leaveType as LeaveType} />
                   </div>
                 )}
               </section>

@@ -31,19 +31,26 @@ export type BalanceSummary = {
   accrued: number;
   /** Comp-off credits earned (§11). */
   earned: number;
-  /** Manual HR corrections. */
+  /** Manual HR corrections to entitlement itself (not a reassignment or a cancellation). */
   adjusted: number;
+  /** Net effect of being reassigned to/from another leave type (an administrative correction). */
+  converted: number;
   /** Days consumed by approved leave. */
   used: number;
   /** Days returned by cancellation (§16). */
   restored: number;
   /** Days lost to lapse or expiry (§4, §6, §11). */
   lapsed: number;
-  /** opening + accrued + earned + adjusted + restored − used − lapsed */
+  /** opening + accrued + earned + adjusted + restored + converted − used − lapsed */
   available: number;
   /** What they will have accrued by year end, pro-rata. */
   entitlementAnnual: number;
-  /** Total credits granted so far — the denominator for the balance ring. */
+  /**
+   * Total genuinely *credited* so far this year — the denominator for the balance ring.
+   * Deliberately excludes CANCEL_CREDIT and CONVERSION: both just undo or redirect a debit that
+   * was already drawn against this pool, so counting them here would make cancelling or
+   * reassigning a leave request inflate how much you were ever granted, which it doesn't.
+   */
   granted: number;
 };
 
@@ -64,17 +71,18 @@ export function summariseBalance(
   const opening = sum("OPENING");
   const accrued = sum("ACCRUAL");
   const earned = sum("COMP_CREDIT");
-  const adjusted = sum("ADJUSTMENT") + sum("CONVERSION");
+  const adjusted = sum("ADJUSTMENT");
+  const converted = sum("CONVERSION");
   const restored = sum("CANCEL_CREDIT");
   const used = Math.abs(sum("AVAIL"));
   const lapsed = Math.abs(sum("LAPSE"));
 
-  const available = roundHalf(opening + accrued + earned + adjusted + restored - used - lapsed);
-  const granted = roundHalf(opening + accrued + earned + adjusted + restored);
+  const available = roundHalf(opening + accrued + earned + adjusted + restored + converted - used - lapsed);
+  const granted = roundHalf(opening + accrued + earned + adjusted);
 
   return {
     leaveType,
-    opening, accrued, earned, adjusted, restored, used, lapsed,
+    opening, accrued, earned, adjusted, converted, restored, used, lapsed,
     available,
     granted,
     entitlementAnnual:
