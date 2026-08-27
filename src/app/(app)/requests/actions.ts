@@ -1,8 +1,11 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireUser } from "@/lib/auth";
-import { cancelRequest, decideRequest, reassignLeaveType } from "@/lib/services/leave";
+import {
+  cancelRequest, decideRequest, deleteRequestPermanently, reassignLeaveType,
+} from "@/lib/services/leave";
 import { NON_CLUBBABLE } from "@/lib/policy/types";
 import type { LeaveType } from "@/lib/policy/types";
 
@@ -56,4 +59,18 @@ export async function reassignAction(_prev: ActionState, formData: FormData): Pr
   revalidatePath("/employees");
   revalidatePath("/");
   return { ok: true };
+}
+
+export async function deleteAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const requestId = String(formData.get("requestId") ?? "");
+  const reason = String(formData.get("reason") ?? "");
+
+  const result = await deleteRequestPermanently(requestId, admin.id, reason);
+  if (!result.ok) return { error: result.error };
+
+  revalidatePath("/requests");
+  revalidatePath("/employees");
+  revalidatePath("/");
+  redirect("/requests?deleted=1");
 }

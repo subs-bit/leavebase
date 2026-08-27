@@ -529,6 +529,65 @@ export async function reassignLeaveType(
   return { ok: true };
 }
 
+/**
+ * Administrator/Founder last resort — erase a request completely, as though it never existed:
+ * every ledger entry it ever posted (its original debit, and any cancel-credit or reassignment
+ * on top of it), its approval trail, and the request itself. Unlike `cancelRequest`, which keeps
+ * a full paper trail by design (§16), this leaves none — for the case a request was recorded
+ * wrongly enough that cancelling it doesn't put things right, and it needs to disappear outright.
+ * There is no undo; the audit log entry this writes is the only trace that remains.
+ */
+export async function deleteRequestPermanently(
+  requestId: string,
+  actorId: string,
+  reason: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const request = await db.leaveRequest.findUnique({
+    where: { id: requestId },
+    include: { user: { select: { name: true } } },
+  });
+  if (!request) return { ok: false, error: "Request not found." };
+  if (!reason.trim()) return { ok: false, error: "A reason is required." };
+
+  const start = dayKey(request.startDate);
+  const end = dayKey(request.endDate);
+  const meta = LEAVE_META[request.leaveType as LeaveType];
+
+  // LeaveRequestDay and Approval cascade-delete with the request. LeaveLedger and CompOffCredit
+  // only have their link to it *cleared* on delete (so history survives a normal deletion
+  // elsewhere) — for a permanent erasure that must not leave the balance or credits affected, both
+  // need explicit cleanup first.
+  await db.$transaction(async (tx) => {
+    await tx.compOffCredit.updateMany({
+      where: { consumedById: requestId },
+      data: { status: "APPROVED", consumedById: null },
+    });
+    await tx.leaveLedger.deleteMany({ where: { requestId } });
+    await tx.leaveRequest.delete({ where: { id: requestId } });
+  });
+
+  await audit({
+    actorId,
+    action: "REQUEST_DELETED",
+    entity: "LeaveRequest",
+    entityId: requestId,
+    summary:
+      `Permanently deleted ${request.code} for ${request.user.name} — ${meta?.name ?? request.leaveType}, ` +
+      `${pluralDays(request.chargedDays)}, ${fmtRange(start, end)}, was ${request.status} — ${reason.trim()}`,
+    meta: { code: request.code, leaveType: request.leaveType, chargedDays: request.chargedDays, wasStatus: request.status },
+  });
+
+  await notify({
+    userId: request.userId,
+    kind: "CANCELLED",
+    title: `A ${meta?.name ?? "leave"} record was deleted`,
+    body: `${fmtRange(start, end)} — ${reason.trim()}. Speak to HR if this is unexpected.`,
+    link: "/requests",
+  });
+
+  return { ok: true };
+}
+
 // ── comp-off (§11) ────────────────────────────────────────────────────────────
 
 export async function claimCompOff(

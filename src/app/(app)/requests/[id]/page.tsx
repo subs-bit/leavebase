@@ -5,7 +5,7 @@ import { canViewUser, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { PageBody, PageHeader } from "@/components/PageHeader";
 import { ApprovalTimeline } from "@/components/ApprovalTimeline";
-import { CancelPanel, DecisionPanel, ReassignPanel } from "@/components/DecisionPanel";
+import { CancelPanel, DecisionPanel, DeletePanel, ReassignPanel } from "@/components/DecisionPanel";
 import {
   Avatar, Chip, leaveInk, leaveTint, LeaveChip, PolicyNote, SectionHeader, StatusChip,
 } from "@/components/ui/primitives";
@@ -70,6 +70,7 @@ export default async function RequestDetailPage({
     isAdministrator(viewer.role) &&
     request.status === "APPROVED" &&
     NON_CLUBBABLE.includes(request.leaveType as LeaveType);
+  const canDelete = isAdministrator(viewer.role);
 
   const snapshot = safeJson(request.policySnapshot);
   const findings: Finding[] = Array.isArray(snapshot.findings) ? (snapshot.findings as Finding[]) : [];
@@ -316,7 +317,7 @@ export default async function RequestDetailPage({
             )}
 
             {/* actions */}
-            {(canDecide || canCancel || canReassign) && (
+            {(canDecide || canCancel || canReassign || canDelete) && (
               <section className="card p-5">
                 <p className="eyebrow mb-3.5">
                   {canDecide ? "Your decision" : isOwn ? "Change of plan" : "Manage"}
@@ -340,6 +341,14 @@ export default async function RequestDetailPage({
                     style={(canDecide || canCancel) ? { borderColor: "var(--c-border)" } : undefined}
                   >
                     <ReassignPanel requestId={request.id} currentType={request.leaveType as LeaveType} />
+                  </div>
+                )}
+                {canDelete && (
+                  <div
+                    className={(canDecide || canCancel || canReassign) ? "mt-4 border-t pt-4" : ""}
+                    style={(canDecide || canCancel || canReassign) ? { borderColor: "var(--c-border)" } : undefined}
+                  >
+                    <DeletePanel requestId={request.id} />
                   </div>
                 )}
               </section>

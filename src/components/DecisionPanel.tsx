@@ -2,8 +2,10 @@
 
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Check, Loader2, X } from "lucide-react";
-import { cancelAction, decideAction, reassignAction, type ActionState } from "@/app/(app)/requests/actions";
+import { AlertTriangle, Check, Loader2, X } from "lucide-react";
+import {
+  cancelAction, decideAction, deleteAction, reassignAction, type ActionState,
+} from "@/app/(app)/requests/actions";
 import { SubmitButton } from "./ui/SubmitButton";
 import { PolicyNote } from "./ui/primitives";
 import { LEAVE_META, NON_CLUBBABLE } from "@/lib/policy/types";
@@ -245,6 +247,78 @@ export function ReassignPanel({ requestId, currentType }: { requestId: string; c
           pendingLabel="Changing…"
         >
           Change type
+        </SubmitButton>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Administrator/Founder last resort — erase a request completely rather than cancel it. Reserved
+ * for a request recorded wrongly enough that a cancellation's paper trail doesn't put things
+ * right. There is no undo, so this asks for the reason to be typed out, not just picked.
+ */
+export function DeletePanel({ requestId }: { requestId: string }) {
+  const [state, action] = useActionState<ActionState, FormData>(deleteAction, {});
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="btn btn-ghost w-full"
+        style={{ color: "var(--c-danger-ink)" }}
+      >
+        <AlertTriangle size={14} />
+        Delete permanently
+      </button>
+    );
+  }
+
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="requestId" value={requestId} />
+
+      <div
+        className="flex items-start gap-2.5 rounded-xl px-3.5 py-3"
+        style={{ background: "var(--c-danger-tint)" }}
+      >
+        <AlertTriangle size={15} style={{ color: "var(--c-danger-ink)", marginTop: 1, flexShrink: 0 }} />
+        <p className="text-[12px] leading-snug" style={{ color: "var(--c-danger-ink)" }}>
+          This erases the request and everything it posted to the balance ledger. It cannot be
+          undone — cancelling instead keeps a record and can still be reversed.
+        </p>
+      </div>
+
+      <div>
+        <label className="label" htmlFor="delete-reason">Why is this being deleted, not cancelled?</label>
+        <textarea
+          id="delete-reason"
+          name="reason"
+          rows={2}
+          required
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          className="field resize-none"
+          placeholder="e.g. entered against the wrong employee entirely…"
+        />
+      </div>
+
+      {state.error && <PolicyNote level="BLOCK" title={state.error} />}
+
+      <div className="flex gap-2.5">
+        <button type="button" onClick={() => setOpen(false)} className="btn btn-ghost flex-1">
+          Keep it
+        </button>
+        <SubmitButton
+          variant="danger"
+          className="flex-1"
+          disabled={reason.trim().length < 3}
+          pendingLabel="Deleting…"
+        >
+          Delete permanently
         </SubmitButton>
       </div>
     </form>

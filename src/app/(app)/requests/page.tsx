@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight, CalendarDays, Plus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CalendarDays, CheckCircle2, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { PageBody, PageHeader } from "@/components/PageHeader";
@@ -27,9 +27,9 @@ const TABS = [
 export default async function RequestsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; deleted?: string }>;
 }) {
-  const { tab = "all" } = await searchParams;
+  const { tab = "all", deleted } = await searchParams;
   const user = await requireUser();
   const today = todayKey();
   const cfg = await getPolicy();
@@ -67,6 +67,17 @@ export default async function RequestsPage({
       />
 
       <PageBody className="space-y-5">
+        {deleted === "1" && (
+          <div
+            className="animate-in flex items-center gap-3 rounded-2xl px-4 py-3.5"
+            style={{ background: "var(--c-success-tint)" }}
+          >
+            <CheckCircle2 size={17} style={{ color: "var(--c-success-ink)" }} />
+            <p className="text-[13.5px] font-bold" style={{ color: "var(--c-success-ink)" }}>
+              Deleted — nothing from it remains on the balance ledger.
+            </p>
+          </div>
+        )}
         <nav className="flex flex-wrap gap-2">
           {TABS.map((t) => {
             const active = tab === t.key;
