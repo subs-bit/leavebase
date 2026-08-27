@@ -3,7 +3,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { addDaysKey, dayKey, DayKey, fmtDate, fmtRange, fromKey, pluralDays, todayKey } from "@/lib/date";
 import { evaluateRequest, Evaluation } from "@/lib/policy/evaluate";
-import { leaveYearOf, roundHalf } from "@/lib/policy/leave-year";
+import { leaveYearOf, roundHalf, toEligibility } from "@/lib/policy/leave-year";
+import { availableAsOf } from "@/lib/policy/balance";
 import { currentStep, statusForProgress } from "@/lib/policy/routing";
 import { canOverrideDecisions, LEAVE_META, NON_CLUBBABLE } from "@/lib/policy/types";
 import type { HalfDay, LeaveType } from "@/lib/policy/types";
@@ -781,7 +782,7 @@ export async function recordHistoricalLeave(opts: {
   if (!reason.trim()) return { ok: false, error: "Note what this leave was for." };
 
   const { buildBreakdown } = await import("@/lib/policy/calendar");
-  const { getCalendarContext, getPolicy: loadPolicy, getBalances } = await import("./context");
+  const { getCalendarContext, getPolicy: loadPolicy } = await import("./context");
   const { diffDays } = await import("@/lib/date");
 
   if (diffDays(start, end) < 0) return { ok: false, error: "The end date is before the start date." };
@@ -795,10 +796,7 @@ export async function recordHistoricalLeave(opts: {
     };
   }
 
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { name: true, role: true },
-  });
+  const user = await db.user.findUnique({ where: { id: userId } });
   if (!user) return { ok: false, error: "Employee not found." };
   if (user.role === "FOUNDER") {
     return { ok: false, error: `${user.name} sits outside the leave policy, so there is no balance to record against.` };
@@ -829,12 +827,15 @@ export async function recordHistoricalLeave(opts: {
     };
   }
 
-  // §13 — a shortfall against the balance becomes unpaid rather than blocking the record. Only
-  // meaningful for the types that draw from a running balance (CL/SL/PL/comp-off) — Maternity and
-  // Paternity aren't (LEAVE_META.accrues is false for both, the same guard evaluateRequest uses),
-  // so recording them never manufactures a false Loss of Pay against a balance that doesn't exist.
-  const balances = await getBalances(userId, cfg, ly);
-  const available = balances.find((b) => b.leaveType === leaveType)?.available ?? 0;
+  // §13 — a shortfall against the balance becomes unpaid rather than blocking the record. Checked
+  // against the balance as it stood *on the leave date itself*, not today's — today's balance
+  // never retroactively pays for an earlier shortfall; whether a backdated day was covered was
+  // decided on the day, permanently (see `availableAsOf`). Only meaningful for the types that draw
+  // from a running balance (CL/SL/PL/comp-off) — Maternity and Paternity aren't (LEAVE_META.accrues
+  // is false for both, the same guard evaluateRequest uses), so recording them never manufactures
+  // a false Loss of Pay against a balance that doesn't exist.
+  const entries = await db.leaveLedger.findMany({ where: { userId, leaveYear: ly.label } });
+  const available = availableAsOf(leaveType, entries, toEligibility(user), ly, cfg, start);
   const lopDays = LEAVE_META[leaveType].accrues
     ? Math.max(0, roundHalf(breakdown.chargedDays - available))
     : 0;

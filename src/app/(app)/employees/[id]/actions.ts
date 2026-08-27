@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { requireHr } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dayKey, fromKey, todayKey } from "@/lib/date";
+import { fromKey, todayKey } from "@/lib/date";
 import { audit, notify } from "@/lib/services/activity";
 import { getCalendarContext, getPolicy } from "@/lib/services/context";
 import { runAccrual } from "@/lib/services/accrual";
 import { buildBreakdown } from "@/lib/policy/calendar";
-import { summariseAll } from "@/lib/policy/balance";
+import { availableAsOf, summariseAll } from "@/lib/policy/balance";
 import { leaveYearOf, roundHalf, toEligibility } from "@/lib/policy/leave-year";
 import { LEAVE_META } from "@/lib/policy/types";
 import type { LeaveType } from "@/lib/policy/types";
@@ -186,9 +186,9 @@ export type LeavePreview =
 
 /**
  * Read-only — computes exactly what `recordLeaveAction` would do, without writing anything, so
- * the form can show it live as HR fills in the dates. "Today" is what actually decides paid vs.
- * unpaid (a backdated entry draws on the balance you have *now*, not what you had back then) —
- * the balance "on that date" is shown alongside purely so it's clear why those can differ.
+ * the form can show it live as HR fills in the dates. The balance *on that date* is what decides
+ * paid vs. unpaid (§13) — today's is shown alongside only for context, since it's what the
+ * dashboard and everything else currently shows for this person.
  */
 export async function previewHistoricalLeave(opts: {
   userId: string;
@@ -237,31 +237,26 @@ export async function computeLeavePreview(opts: {
     return { ok: false, error: "Those dates are all weekly offs or holidays — nothing would be deducted." };
   }
 
-  // `getBalances`/`summariseBalance` don't actually filter by `asOf` — every existing call site
-  // always passes today, so that's never mattered before. A genuine "as it stood on that date"
-  // snapshot means re-summarising the ledger with only the entries dated on or before it, done
-  // locally here rather than changing the shared function (which every other balance display in
-  // the app calls, always with today, and shouldn't have its behaviour touched for their sake).
   const emp = toEligibility(user);
   const entries = await db.leaveLedger.findMany({ where: { userId, leaveYear: ly.label } });
-  const entriesOnDate = entries.filter((e) => dayKey(e.effectiveDate) <= from);
   const balancesToday = summariseAll(entries, emp, ly, cfg);
-  const balancesOnDate = summariseAll(entriesOnDate, emp, ly, cfg, from as never);
 
   const pooled: LeaveType[] = ["CL", "SL", "PL", "COMP_OFF"];
   const balances = pooled.map((t) => ({
     type: t,
     name: LEAVE_META[t].name,
     availableToday: balancesToday.find((b) => b.leaveType === t)?.available ?? 0,
-    availableOnDate: balancesOnDate.find((b) => b.leaveType === t)?.available ?? 0,
+    availableOnDate: availableAsOf(t, entries, emp, ly, cfg, from as never),
   }));
 
   const accrues = LEAVE_META[leaveType].accrues;
-  const availableToday = balancesToday.find((b) => b.leaveType === leaveType)?.available ?? 0;
-  const lopDays = accrues ? Math.max(0, roundHalf(breakdown.chargedDays - availableToday)) : 0;
+  const availableOnDate = balances.find((b) => b.type === leaveType)?.availableOnDate ?? 0;
+  // §13 — what the day itself could cover decides paid vs. unpaid; today's larger balance never
+  // retroactively pays for an earlier shortfall (see `recordHistoricalLeave` and `availableAsOf`).
+  const lopDays = accrues ? Math.max(0, roundHalf(breakdown.chargedDays - availableOnDate)) : 0;
   const payable = roundHalf(breakdown.chargedDays - lopDays);
+  const availableToday = balancesToday.find((b) => b.leaveType === leaveType)?.available ?? 0;
   const newAvailableToday = accrues ? roundHalf(availableToday - payable) : availableToday;
-  const availableOnDate = balancesOnDate.find((b) => b.leaveType === leaveType)?.available ?? 0;
   const newAvailableOnDate = accrues ? roundHalf(availableOnDate - payable) : availableOnDate;
 
   return {

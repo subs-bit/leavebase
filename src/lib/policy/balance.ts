@@ -112,6 +112,48 @@ export function availableOf(all: BalanceSummary[], type: LeaveType): number {
 }
 
 /**
+ * §13 — the balance that actually decides whether a *backdated* leave record is paid or Loss of
+ * Pay: what stood on the day itself, not what stands today. Today's larger balance never pays for
+ * an earlier day's shortfall — that day was either covered by what had accrued by then, or it
+ * wasn't, permanently.
+ *
+ * This can't just filter the ledger's ACCRUAL entries by date, because *when an entry was posted*
+ * and *when it was earned* aren't the same thing: the accrual job runs opportunistically on
+ * sign-in, so someone's first-ever run after a gap posts one lump dated to whichever quarter is
+ * current *then* — not one entry per quarter as it's earned. Asking "what does the ledger show
+ * before this date" would wrongly read that gap as zero. `accruedToDate` sidesteps this by asking
+ * the §7 schedule directly, independent of when anything happened to get posted. Every other term
+ * (debits, corrections, comp-off's individually dated credits) genuinely is anchored to when it
+ * happened, so those are simply filtered by date as normal.
+ */
+export function availableAsOf(
+  leaveType: LeaveType,
+  entries: LedgerEntry[],
+  emp: EligibilityInput,
+  ly: LeaveYear,
+  cfg: PolicyConfig,
+  asOf: DayKey,
+): number {
+  const mine = entries.filter((e) => e.leaveType === leaveType && dayKey(e.effectiveDate) <= asOf);
+  const sum = (kind: string) =>
+    roundHalf(mine.filter((e) => e.entryKind === kind).reduce((s, e) => s + e.amount, 0));
+
+  const opening = sum("OPENING");
+  const accrued =
+    leaveType === "CL" || leaveType === "SL" || leaveType === "PL"
+      ? accruedToDate(leaveType, emp, ly, cfg, asOf)
+      : sum("ACCRUAL"); // comp-off's credits are individually dated already — no schedule to ask
+  const earned = sum("COMP_CREDIT");
+  const adjusted = sum("ADJUSTMENT");
+  const converted = sum("CONVERSION");
+  const restored = sum("CANCEL_CREDIT");
+  const used = Math.abs(sum("AVAIL"));
+  const lapsed = Math.abs(sum("LAPSE"));
+
+  return roundHalf(opening + accrued + earned + adjusted + restored + converted - used - lapsed);
+}
+
+/**
  * What accrual *should* have credited by now, versus what the ledger actually holds. The
  * difference is what `runAccrual` will post — this makes the accrual job idempotent.
  *

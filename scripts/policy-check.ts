@@ -8,7 +8,7 @@ import { evaluateRequest } from "../src/lib/policy/evaluate";
 import {
   accrualPeriods, accrualSchedule, accruedToDate, computeCarryForward, leaveYearOf, quartersOf,
 } from "../src/lib/policy/leave-year";
-import { accrualGap, summariseBalance } from "../src/lib/policy/balance";
+import { accrualGap, availableAsOf, summariseBalance } from "../src/lib/policy/balance";
 import type { BalanceSummary } from "../src/lib/policy/balance";
 
 let pass = 0, fail = 0;
@@ -328,6 +328,53 @@ const reassignedIn = summariseBalance("SL", [
 ], veteran, ly, cfg, "2026-08-12");
 eq("reassigning a debit in reduces available like any other debit", reassignedIn.available, 6);
 eq("granted on the type it lands on is unaffected by the recharge", reassignedIn.granted, 9);
+
+section("availableAsOf — §13 point-in-time balance for backdated records");
+eq(
+  "with no ledger at all, still correctly gives the schedule amount for that date",
+  availableAsOf("CL", [], veteran, ly, cfg, "2026-05-18"),
+  1.5, // Q1 only — Q2 hasn't started yet as of 18 May
+);
+
+const lumpedCatchUp = [
+  // A first-ever accrual run that happened mid-Q2 posts one lump dated to Q2's start, covering
+  // both Q1 and Q2 at once — exactly what happened on a real account in production.
+  { leaveType: "CL", entryKind: "ACCRUAL", amount: 3, effectiveDate: "2026-07-01" },
+];
+eq(
+  "a late lump credit doesn't fool an earlier date into reading zero",
+  availableAsOf("CL", lumpedCatchUp, veteran, ly, cfg, "2026-05-18"),
+  1.5, // naive date-filtering on the ledger would wrongly give 0 here — the lump is dated in July
+);
+eq(
+  "the same lump correctly covers a date after it landed",
+  availableAsOf("CL", lumpedCatchUp, veteran, ly, cfg, "2026-08-12"),
+  3,
+);
+
+const lumpedWithEarlierUse = [
+  ...lumpedCatchUp,
+  { leaveType: "CL", entryKind: "AVAIL", amount: -1, effectiveDate: "2026-05-01" },
+];
+eq(
+  "a genuine debit before that date still counts against it",
+  availableAsOf("CL", lumpedWithEarlierUse, veteran, ly, cfg, "2026-05-18"),
+  0.5, // 1.5 scheduled by then, minus the 1 already used
+);
+
+const compOffCredits = [
+  { leaveType: "COMP_OFF", entryKind: "COMP_CREDIT", amount: 1, effectiveDate: "2026-08-01" },
+];
+eq(
+  "comp-off has no schedule to consult — a credit dated after the day in question doesn't count yet",
+  availableAsOf("COMP_OFF", compOffCredits, veteran, ly, cfg, "2026-07-15"),
+  0,
+);
+eq(
+  "the same credit counts once its own date arrives",
+  availableAsOf("COMP_OFF", compOffCredits, veteran, ly, cfg, "2026-08-15"),
+  1,
+);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);
