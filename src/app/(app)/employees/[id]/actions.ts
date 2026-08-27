@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { requireHr } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { fromKey, todayKey } from "@/lib/date";
+import { dayKey, fromKey, todayKey } from "@/lib/date";
 import { audit, notify } from "@/lib/services/activity";
-import { getPolicy } from "@/lib/services/context";
+import { getCalendarContext, getPolicy } from "@/lib/services/context";
 import { runAccrual } from "@/lib/services/accrual";
-import { leaveYearOf } from "@/lib/policy/leave-year";
+import { buildBreakdown } from "@/lib/policy/calendar";
+import { summariseAll } from "@/lib/policy/balance";
+import { leaveYearOf, roundHalf, toEligibility } from "@/lib/policy/leave-year";
 import { LEAVE_META } from "@/lib/policy/types";
 import type { LeaveType } from "@/lib/policy/types";
 
@@ -163,6 +165,101 @@ export async function recordLeaveAction(_prev: HrState, formData: FormData): Pro
       `Recorded ${result.chargedDays} day(s) of ${LEAVE_META[leaveType].name}` +
       (result.lopDays > 0 ? `, of which ${result.lopDays} is unpaid (§13).` : "."),
   };
+}
+
+export type LeavePreviewBalance = { type: LeaveType; name: string; availableToday: number; availableOnDate: number };
+export type LeavePreview =
+  | {
+      ok: true;
+      chargedDays: number;
+      balances: LeavePreviewBalance[];
+      /** False for Maternity/Paternity — they aren't drawn from a day balance (§9/§10). */
+      accrues: boolean;
+      payable: number;
+      lopDays: number;
+      newAvailableToday: number;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Read-only — computes exactly what `recordLeaveAction` would do, without writing anything, so
+ * the form can show it live as HR fills in the dates. "Today" is what actually decides paid vs.
+ * unpaid (a backdated entry draws on the balance you have *now*, not what you had back then) —
+ * the balance "on that date" is shown alongside purely so it's clear why those can differ.
+ */
+export async function previewHistoricalLeave(opts: {
+  userId: string;
+  leaveType: string;
+  from: string;
+  to: string;
+  halfDay: string;
+}): Promise<LeavePreview> {
+  await requireHr();
+  return computeLeavePreview(opts);
+}
+
+/** The computation `previewHistoricalLeave` gates behind auth — split out so it's independently testable. */
+export async function computeLeavePreview(opts: {
+  userId: string;
+  leaveType: string;
+  from: string;
+  to: string;
+  halfDay: string;
+}): Promise<LeavePreview> {
+  const { userId, halfDay } = opts;
+  const from = opts.from;
+  const to = opts.to || from;
+  const leaveType = opts.leaveType as LeaveType;
+
+  if (!LEAVE_META[leaveType]) return { ok: false, error: "Pick a leave type." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return { ok: false, error: "Pick the first day." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) return { ok: false, error: "Pick the last day." };
+  if (to < from) return { ok: false, error: "The last day is before the first day." };
+
+  const cfg = await getPolicy();
+  const ly = leaveYearOf(from as never, cfg);
+  if (leaveYearOf(to as never, cfg).label !== ly.label) {
+    return { ok: false, error: "These dates span two leave years — preview one leave year at a time." };
+  }
+
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (!user) return { ok: false, error: "Employee not found." };
+
+  const ctx = await getCalendarContext(userId, cfg);
+  const breakdown = buildBreakdown({
+    start: from as never, end: to as never, leaveType,
+    halfDay: halfDay as never, ctx,
+  });
+  if (breakdown.chargedDays <= 0) {
+    return { ok: false, error: "Those dates are all weekly offs or holidays — nothing would be deducted." };
+  }
+
+  // `getBalances`/`summariseBalance` don't actually filter by `asOf` — every existing call site
+  // always passes today, so that's never mattered before. A genuine "as it stood on that date"
+  // snapshot means re-summarising the ledger with only the entries dated on or before it, done
+  // locally here rather than changing the shared function (which every other balance display in
+  // the app calls, always with today, and shouldn't have its behaviour touched for their sake).
+  const emp = toEligibility(user);
+  const entries = await db.leaveLedger.findMany({ where: { userId, leaveYear: ly.label } });
+  const entriesOnDate = entries.filter((e) => dayKey(e.effectiveDate) <= from);
+  const balancesToday = summariseAll(entries, emp, ly, cfg);
+  const balancesOnDate = summariseAll(entriesOnDate, emp, ly, cfg, from as never);
+
+  const pooled: LeaveType[] = ["CL", "SL", "PL", "COMP_OFF"];
+  const balances = pooled.map((t) => ({
+    type: t,
+    name: LEAVE_META[t].name,
+    availableToday: balancesToday.find((b) => b.leaveType === t)?.available ?? 0,
+    availableOnDate: balancesOnDate.find((b) => b.leaveType === t)?.available ?? 0,
+  }));
+
+  const accrues = LEAVE_META[leaveType].accrues;
+  const availableToday = balancesToday.find((b) => b.leaveType === leaveType)?.available ?? 0;
+  const lopDays = accrues ? Math.max(0, roundHalf(breakdown.chargedDays - availableToday)) : 0;
+  const payable = roundHalf(breakdown.chargedDays - lopDays);
+  const newAvailableToday = accrues ? roundHalf(availableToday - payable) : availableToday;
+
+  return { ok: true, chargedDays: breakdown.chargedDays, balances, accrues, payable, lopDays, newAvailableToday };
 }
 
 /** §12/§13 — mark days an employee was absent without approval. */

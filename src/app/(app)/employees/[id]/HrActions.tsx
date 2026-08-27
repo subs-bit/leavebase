@@ -1,15 +1,15 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, Wallet } from "lucide-react";
 import {
-  adjustBalanceAction, confirmEmployeeAction, recordAbsenceAction, recordExitAction,
-  recordLeaveAction, resolveFlagAction, type HrState,
+  adjustBalanceAction, confirmEmployeeAction, previewHistoricalLeave, recordAbsenceAction,
+  recordExitAction, recordLeaveAction, resolveFlagAction, type HrState, type LeavePreview,
 } from "./actions";
 import { PolicyNote } from "@/components/ui/primitives";
 import { BALANCE_TYPES, HALF_DAY_LABEL, LEAVE_META } from "@/lib/policy/types";
-import { todayKey } from "@/lib/date";
+import { fmtDate, fmtDays, todayKey } from "@/lib/date";
 
 function Submit({ label, tone = "primary" }: { label: string; tone?: "primary" | "danger" }) {
   const { pending } = useFormStatus();
@@ -155,8 +155,30 @@ export function RecordLeaveTaken({ userId, name }: { userId: string; name: strin
   const [type, setType] = useState("CL");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [halfDay, setHalfDay] = useState("NONE");
   const today = todayKey();
   const singleDay = !!from && (from === to || !to);
+
+  // Live, read-only preview of the balance impact — recomputed shortly after the dates or type
+  // settle, so filling the form doesn't fire a request on every keystroke.
+  const [preview, setPreview] = useState<LeavePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const requestSeq = useRef(0);
+
+  useEffect(() => {
+    if (!open || !from) { setPreview(null); return; }
+    const seq = ++requestSeq.current;
+    setPreviewLoading(true);
+    const timer = setTimeout(() => {
+      previewHistoricalLeave({
+        userId, leaveType: type, from, to: to || from,
+        halfDay: singleDay ? halfDay : "NONE",
+      })
+        .then((result) => { if (seq === requestSeq.current) setPreview(result); })
+        .finally(() => { if (seq === requestSeq.current) setPreviewLoading(false); });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [open, userId, type, from, to, halfDay, singleDay]);
 
   if (state.ok) {
     return (
@@ -212,13 +234,27 @@ export function RecordLeaveTaken({ userId, name }: { userId: string; name: strin
       {singleDay && (
         <div>
           <label className="label" htmlFor="rec-half">Duration</label>
-          <select id="rec-half" name="halfDay" className="field" defaultValue="NONE">
+          <select
+            id="rec-half" name="halfDay" className="field"
+            value={halfDay} onChange={(e) => setHalfDay(e.target.value)}
+          >
             {(["NONE", "FIRST_HALF", "SECOND_HALF"] as const).map((h) => (
               <option key={h} value={h}>{HALF_DAY_LABEL[h]}</option>
             ))}
           </select>
         </div>
       )}
+
+      {from && (
+        <BalanceImpactPreview
+          preview={preview}
+          loading={previewLoading}
+          type={type}
+          typeName={LEAVE_META[type as keyof typeof LEAVE_META]?.name}
+          from={from}
+        />
+      )}
+
       <div>
         <label className="label" htmlFor="rec-reason">What was it for?</label>
         <input
@@ -241,6 +277,104 @@ export function RecordLeaveTaken({ userId, name }: { userId: string; name: strin
         deduction still apply in full, and a shortfall becomes Loss of Pay (§13).
       </p>
     </form>
+  );
+}
+
+/**
+ * What recording this leave would actually do, before it's submitted. "Today" decides paid vs.
+ * unpaid — a backdated entry draws on the balance available *now*, not what stood on the day
+ * itself — so both figures are shown side by side rather than just one, to make that explicit.
+ */
+function BalanceImpactPreview({
+  preview, loading, type, typeName, from,
+}: {
+  preview: LeavePreview | null;
+  loading: boolean;
+  type: string;
+  typeName?: string;
+  from: string;
+}) {
+  if (!preview) {
+    return loading ? (
+      <div
+        className="flex items-center gap-2 rounded-xl px-3.5 py-3 text-[12px]"
+        style={{ background: "var(--c-surface-2)", color: "var(--c-ink-400)" }}
+      >
+        <Loader2 size={13} className="animate-spin" />
+        Working out the balance impact…
+      </div>
+    ) : null;
+  }
+
+  if (!preview.ok) {
+    return <PolicyNote level="WARN" title={preview.error} />;
+  }
+
+  const current = preview.balances.find((b) => b.type === type);
+
+  return (
+    <div className="space-y-3 rounded-xl p-3.5" style={{ background: "var(--c-surface-2)" }}>
+      <div className="flex items-center gap-2">
+        <Wallet size={13} style={{ color: "var(--c-ink-400)" }} />
+        <p className="text-[11px] font-bold uppercase tracking-[0.04em]" style={{ color: "var(--c-ink-400)" }}>
+          Balance impact
+        </p>
+        {loading && <Loader2 size={11} className="animate-spin" style={{ color: "var(--c-ink-400)" }} />}
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 text-[10.5px] font-bold" style={{ color: "var(--c-ink-400)" }}>
+          <span />
+          <span className="text-right">On {fmtDate(from)}</span>
+          <span className="text-right">Today</span>
+        </div>
+        {preview.balances.map((b) => (
+          <div
+            key={b.type}
+            className="grid grid-cols-[1fr_auto_auto] gap-x-3 text-[12px]"
+            style={b.type === type ? { fontWeight: 700 } : undefined}
+          >
+            <span style={{ color: "var(--c-ink-700)" }}>{b.name}</span>
+            <span className="text-right tnum" style={{ color: "var(--c-ink-500)" }}>{fmtDays(b.availableOnDate)}</span>
+            <span className="text-right tnum" style={{ color: "var(--c-ink-900)" }}>{fmtDays(b.availableToday)}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t pt-2.5" style={{ borderColor: "var(--c-border)" }}>
+        {!preview.accrues ? (
+          <p className="text-[12px] leading-snug" style={{ color: "var(--c-ink-500)" }}>
+            {typeName} isn&rsquo;t tracked against a day balance — all {fmtDays(preview.chargedDays)} would be
+            recorded in full, subject to its own entitlement limit (§9/§10).
+          </p>
+        ) : (
+          <>
+            <p className="text-[12.5px] leading-snug" style={{ color: "var(--c-ink-700)" }}>
+              <strong className="tnum">{fmtDays(preview.chargedDays)}</strong> would be charged
+              {preview.payable > 0 && (
+                <>
+                  {" "}— <strong className="tnum">{fmtDays(preview.payable)}</strong> from {typeName}
+                </>
+              )}
+              {preview.lopDays > 0 && (
+                <>
+                  {preview.payable > 0 ? ", and " : " — "}
+                  <strong className="tnum" style={{ color: "var(--c-danger-ink)" }}>
+                    {fmtDays(preview.lopDays)} unpaid (LOP)
+                  </strong>
+                </>
+              )}
+              .
+            </p>
+            <p className="mt-1 text-[12px]" style={{ color: "var(--c-ink-500)" }}>
+              {typeName} today: <span className="tnum">{fmtDays(current?.availableToday ?? 0)}</span>
+              {" → after this: "}
+              <strong className="tnum" style={{ color: "var(--c-ink-900)" }}>{fmtDays(preview.newAvailableToday)}</strong>
+            </p>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

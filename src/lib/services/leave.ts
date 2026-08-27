@@ -829,10 +829,15 @@ export async function recordHistoricalLeave(opts: {
     };
   }
 
-  // §13 — a shortfall against the balance becomes unpaid rather than blocking the record.
+  // §13 — a shortfall against the balance becomes unpaid rather than blocking the record. Only
+  // meaningful for the types that draw from a running balance (CL/SL/PL/comp-off) — Maternity and
+  // Paternity aren't (LEAVE_META.accrues is false for both, the same guard evaluateRequest uses),
+  // so recording them never manufactures a false Loss of Pay against a balance that doesn't exist.
   const balances = await getBalances(userId, cfg, ly);
   const available = balances.find((b) => b.leaveType === leaveType)?.available ?? 0;
-  const lopDays = Math.max(0, roundHalf(breakdown.chargedDays - available));
+  const lopDays = LEAVE_META[leaveType].accrues
+    ? Math.max(0, roundHalf(breakdown.chargedDays - available))
+    : 0;
   const payable = roundHalf(breakdown.chargedDays - lopDays);
 
   const count = await db.leaveRequest.count();
