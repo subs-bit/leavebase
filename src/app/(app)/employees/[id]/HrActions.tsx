@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { Fragment, useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Loader2, Wallet } from "lucide-react";
 import {
@@ -322,22 +322,31 @@ function BalanceImpactPreview({
         {loading && <Loader2 size={11} className="animate-spin" style={{ color: "var(--c-ink-400)" }} />}
       </div>
 
-      <div className="space-y-1.5">
-        <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 text-[10.5px] font-bold" style={{ color: "var(--c-ink-400)" }}>
-          <span />
-          <span className="text-right">On {fmtDate(from)}</span>
-          <span className="text-right">Today</span>
-        </div>
+      {/* One shared grid for the header and every row, so the two number columns actually line
+          up — each row being its own separate grid sized its columns independently, which is
+          what threw the alignment off. */}
+      <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-3 gap-y-1.5">
+        <span />
+        <span className="text-right text-[10.5px] font-bold" style={{ color: "var(--c-ink-400)" }}>
+          On {fmtDate(from)}
+        </span>
+        <span className="text-right text-[10.5px] font-bold" style={{ color: "var(--c-ink-400)" }}>Today</span>
+
         {preview.balances.map((b) => (
-          <div
-            key={b.type}
-            className="grid grid-cols-[1fr_auto_auto] gap-x-3 text-[12px]"
-            style={b.type === type ? { fontWeight: 700 } : undefined}
-          >
-            <span style={{ color: "var(--c-ink-700)" }}>{b.name}</span>
-            <span className="text-right tnum" style={{ color: "var(--c-ink-500)" }}>{fmtDays(b.availableOnDate)}</span>
-            <span className="text-right tnum" style={{ color: "var(--c-ink-900)" }}>{fmtDays(b.availableToday)}</span>
-          </div>
+          <Fragment key={b.type}>
+            <span
+              className="text-[12px]"
+              style={{ color: "var(--c-ink-700)", fontWeight: b.type === type ? 700 : undefined }}
+            >
+              {b.name}
+            </span>
+            <span className="text-right text-[12px] tnum" style={{ color: "var(--c-ink-500)" }}>
+              {fmtDays(b.availableOnDate)}
+            </span>
+            <span className="text-right text-[12px] tnum" style={{ color: "var(--c-ink-900)" }}>
+              {fmtDays(b.availableToday)}
+            </span>
+          </Fragment>
         ))}
       </div>
 
