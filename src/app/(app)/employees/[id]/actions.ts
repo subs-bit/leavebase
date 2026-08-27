@@ -178,6 +178,9 @@ export type LeavePreview =
       payable: number;
       lopDays: number;
       newAvailableToday: number;
+      /** What "available on that date" becomes once this is recorded — the new entry is dated to
+       *  the leave itself, so it counts against that historical balance exactly as it does today's. */
+      newAvailableOnDate: number;
     }
   | { ok: false; error: string };
 
@@ -258,8 +261,13 @@ export async function computeLeavePreview(opts: {
   const lopDays = accrues ? Math.max(0, roundHalf(breakdown.chargedDays - availableToday)) : 0;
   const payable = roundHalf(breakdown.chargedDays - lopDays);
   const newAvailableToday = accrues ? roundHalf(availableToday - payable) : availableToday;
+  const availableOnDate = balancesOnDate.find((b) => b.leaveType === leaveType)?.available ?? 0;
+  const newAvailableOnDate = accrues ? roundHalf(availableOnDate - payable) : availableOnDate;
 
-  return { ok: true, chargedDays: breakdown.chargedDays, balances, accrues, payable, lopDays, newAvailableToday };
+  return {
+    ok: true, chargedDays: breakdown.chargedDays, balances, accrues, payable, lopDays,
+    newAvailableToday, newAvailableOnDate,
+  };
 }
 
 /** §12/§13 — mark days an employee was absent without approval. */

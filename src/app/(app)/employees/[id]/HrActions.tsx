@@ -375,11 +375,45 @@ function BalanceImpactPreview({
               )}
               .
             </p>
-            <p className="mt-1 text-[12px]" style={{ color: "var(--c-ink-500)" }}>
+            <p className="mt-1.5 text-[12px] leading-snug" style={{ color: "var(--c-ink-500)" }}>
+              {preview.lopDays === 0 ? (
+                <>
+                  Since {typeName} has <strong className="tnum">{fmtDays(current?.availableToday ?? 0)}</strong> available
+                  {" "}today, this is deducted from balance rather than unpaid.
+                </>
+              ) : preview.payable === 0 ? (
+                <>
+                  Since {typeName} has <strong className="tnum">{fmtDays(current?.availableToday ?? 0)}</strong> available
+                  {" "}today, this is fully unpaid (LOP) rather than deducted from balance.
+                </>
+              ) : (
+                <>
+                  Since {typeName} has only <strong className="tnum">{fmtDays(current?.availableToday ?? 0)}</strong> available
+                  {" "}today, that much is deducted from balance and the rest is unpaid (LOP).
+                </>
+              )}
+            </p>
+            <p className="mt-1.5 text-[12px]" style={{ color: "var(--c-ink-500)" }}>
               {typeName} today: <span className="tnum">{fmtDays(current?.availableToday ?? 0)}</span>
               {" → after this: "}
               <strong className="tnum" style={{ color: "var(--c-ink-900)" }}>{fmtDays(preview.newAvailableToday)}</strong>
             </p>
+            <p className="mt-1 text-[12px]" style={{ color: "var(--c-ink-500)" }}>
+              {typeName} on {fmtDate(from)}: <span className="tnum">{fmtDays(current?.availableOnDate ?? 0)}</span>
+              {" → after this: "}
+              <strong
+                className="tnum"
+                style={{ color: preview.newAvailableOnDate < 0 ? "var(--c-danger-ink)" : "var(--c-ink-900)" }}
+              >
+                {fmtDays(preview.newAvailableOnDate)}
+              </strong>
+            </p>
+            {preview.newAvailableOnDate < 0 && (
+              <p className="mt-1 text-[11px] leading-snug" style={{ color: "var(--c-ink-400)" }}>
+                That goes negative because today&rsquo;s balance is what&rsquo;s paying for this, and it&rsquo;s
+                bigger than what had accrued by {fmtDate(from)} — not a sign anything&rsquo;s wrong.
+              </p>
+            )}
           </>
         )}
       </div>
