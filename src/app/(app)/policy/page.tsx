@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { FileText, Download } from "lucide-react";
+import { Download } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { PageBody, PageHeader } from "@/components/PageHeader";
 import { Chip, leaveInk, leaveTint } from "@/components/ui/primitives";
@@ -372,31 +371,6 @@ export default async function PolicyPage() {
           ))}
         </div>
 
-        <section className="card p-5" style={{ background: "var(--c-info-tint)", borderColor: "transparent" }}>
-          <div className="flex items-start gap-3">
-            <FileText size={18} style={{ color: "var(--c-info-ink)", marginTop: 2 }} />
-            <div>
-              <p className="text-[13.5px] font-bold" style={{ color: "var(--c-info-ink)" }}>
-                One drafting note, carried openly
-              </p>
-              <p className="mt-1 text-[12.5px] leading-relaxed" style={{ color: "var(--c-ink-700)" }}>
-                §4 of the source document reads &ldquo;Six (04) Casual Leaves&rdquo; — the word and
-                the numeral disagree. Prismix confirmed the intent as{" "}
-                <Strong>{cfg.clPerYear}</Strong>, and LeaveBase holds it as a setting HR can correct
-                without a code change. §4–6 also say &ldquo;calendar year&rdquo; while §3 defines the
-                policy year as the financial year; LeaveBase follows §3 throughout, so all
-                entitlement runs April to March.
-              </p>
-              <Link
-                href="/settings"
-                className="mt-2.5 inline-block text-[12px] font-bold"
-                style={{ color: "var(--brand-500)" }}
-              >
-                See the configured values →
-              </Link>
-            </div>
-          </div>
-        </section>
       </PageBody>
     </>
   );
