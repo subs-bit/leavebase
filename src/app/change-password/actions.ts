@@ -31,5 +31,10 @@ export async function setFirstPasswordAction(
     summary: "Set their own password after signing in with a temporary one",
   });
 
+  // Reaching this page at all means an old-style temporary password, from before the switch to
+  // sign-in links — completing it here is this account's real activation moment.
+  const { notifyFirstLogin } = await import("@/lib/email/context");
+  await notifyFirstLogin(user.id).catch(() => {});
+
   redirect("/");
 }

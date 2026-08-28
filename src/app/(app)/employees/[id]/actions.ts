@@ -46,7 +46,7 @@ export async function adjustBalanceAction(_prev: HrState, formData: FormData): P
     },
   });
 
-  const target = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const target = await db.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
   await audit({
     actorId: hr.id,
     action: "BALANCE_ADJUSTED",
@@ -63,6 +63,25 @@ export async function adjustBalanceAction(_prev: HrState, formData: FormData): P
     link: "/requests?tab=balance",
   });
 
+  if (target) {
+    const { balanceAdjustedEmail } = await import("@/lib/email/templates");
+    const { balanceLinesAsOf, fireEmails } = await import("@/lib/email/context");
+    // Fetched after the entry was posted — derive "before" from the adjustment itself rather than
+    // re-querying, since the ledger already moved on.
+    const balanceNow = await balanceLinesAsOf(userId, today);
+    const after = balanceNow.find((b) => b.type === leaveType)?.before ?? 0;
+    fireEmails([
+      {
+        to: { userId, name: target.name, email: target.email },
+        ...balanceAdjustedEmail({
+          employeeFirstName: target.name.split(" ")[0],
+          actorName: hr.name, leaveTypeCode: leaveType, amount, note,
+          balance: [{ type: leaveType, before: roundHalf(after - amount), after }],
+        }),
+      },
+    ]);
+  }
+
   revalidatePath(`/employees/${userId}`);
   return { ok: `Adjusted by ${amount > 0 ? "+" : ""}${amount} days.` };
 }
@@ -74,7 +93,7 @@ export async function confirmEmployeeAction(_prev: HrState, formData: FormData):
   const confirmDate = String(formData.get("confirmDate") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(confirmDate)) return { error: "Pick a confirmation date." };
 
-  const target = await db.user.findUnique({ where: { id: userId }, select: { name: true, status: true } });
+  const target = await db.user.findUnique({ where: { id: userId }, select: { name: true, email: true, status: true } });
   if (!target) return { error: "Employee not found." };
 
   await db.user.update({
@@ -99,6 +118,21 @@ export async function confirmEmployeeAction(_prev: HrState, formData: FormData):
     body: "Privileged Leave is now available to you, credited pro-rata from your confirmation date (§6, §7).",
     link: "/requests?tab=balance",
   });
+
+  const { employeeConfirmedEmail } = await import("@/lib/email/templates");
+  const { balanceLinesAsOf, fireEmails, todayKey: todayKeyFn } = await import("@/lib/email/context");
+  const { fmtDate } = await import("@/lib/date");
+  const balance = await balanceLinesAsOf(userId, todayKeyFn());
+  fireEmails([
+    {
+      to: { userId, name: target.name, email: target.email },
+      ...employeeConfirmedEmail({
+        employeeFirstName: target.name.split(" ")[0],
+        confirmDate: fmtDate(confirmDate),
+        balance,
+      }),
+    },
+  ]);
 
   revalidatePath(`/employees/${userId}`);
   return { ok: "Confirmed. Privileged Leave has been credited pro-rata." };

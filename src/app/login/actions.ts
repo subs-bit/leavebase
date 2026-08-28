@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { createSession, verifyPassword } from "@/lib/auth";
+import { createSession, recordLogin, verifyPassword } from "@/lib/auth";
 import { checkRate, clearRate, recordFailure } from "@/lib/rate-limit";
 import { audit } from "@/lib/services/activity";
 import { runMaintenance } from "@/lib/services/accrual";
@@ -49,11 +49,18 @@ export async function loginAction(
   }
 
   clearRate(key);
-  await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  const { isFirstLogin } = await recordLogin(user.id);
   await createSession(user.id);
   await audit({ actorId: user.id, action: "SIGN_IN", entity: "User", entityId: user.id, summary: "Signed in" });
   // §7 accrual is posted opportunistically rather than depending on a scheduler.
   await runMaintenance(user.id);
+
+  // Only once they've actually finished setting a real password — signing in with a still-live
+  // temporary one isn't "activated" yet, and mustChangePassword forces that step next regardless.
+  if (isFirstLogin && !user.mustChangePassword) {
+    const { notifyFirstLogin } = await import("@/lib/email/context");
+    await notifyFirstLogin(user.id).catch(() => {});
+  }
 
   if (user.mustChangePassword) redirect("/change-password");
   redirect("/");

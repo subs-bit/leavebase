@@ -182,6 +182,25 @@ export async function createEmployee(
   }
 
   const { token, ttlHours } = await issueLoginToken(user.id, "ACTIVATE");
+
+  if (!opts.silent) {
+    const { newEmployeeWelcomeEmail } = await import("@/lib/email/templates");
+    const { fireEmails } = await import("@/lib/email/context");
+    const { APP_URL } = await import("@/lib/email/shell");
+    fireEmails([
+      {
+        to: { userId: user.id, name: user.name, email },
+        ...newEmployeeWelcomeEmail({
+          firstName: user.name.split(" ")[0],
+          email,
+          activationUrl: `${APP_URL}/activate/${token}`,
+          designation: input.designation || input.role,
+          expiresInHours: ttlHours,
+        }),
+      },
+    ]);
+  }
+
   return { ok: true, userId: user.id, activationToken: token, activationExpiresInHours: ttlHours };
 }
 
@@ -350,7 +369,7 @@ export async function resetPassword(
   userId: string,
   actor: { id: string; role: string },
 ): Promise<{ ok: true; resetToken: string; expiresInHours: number } | { ok: false; error: string }> {
-  const user = await db.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
+  const user = await db.user.findUnique({ where: { id: userId }, select: { name: true, role: true, email: true } });
   if (!user) return { ok: false, error: "Employee not found." };
   if (["ADMIN", "FOUNDER"].includes(user.role) && !["ADMIN", "FOUNDER"].includes(actor.role)) {
     return {
@@ -358,6 +377,7 @@ export async function resetPassword(
       error: "Only an administrator or a founder can reset an administrator or founder password.",
     };
   }
+  const performer = await db.user.findUnique({ where: { id: actor.id }, select: { name: true } });
 
   // Locks the account immediately (an unguessable hash nobody is ever shown) — access only
   // returns once the emailed link is used to set a real password.
@@ -375,6 +395,22 @@ export async function resetPassword(
     entityId: userId,
     summary: `Reset ${user.name}'s password and issued a one-time reset link; all their sessions were signed out`,
   });
+
+  const { passwordResetEmail } = await import("@/lib/email/templates");
+  const { fireEmails } = await import("@/lib/email/context");
+  const { APP_URL } = await import("@/lib/email/shell");
+  fireEmails([
+    {
+      to: { userId, name: user.name, email: user.email },
+      ...passwordResetEmail({
+        firstName: user.name.split(" ")[0],
+        email: user.email,
+        resetUrl: `${APP_URL}/reset/${token}`,
+        actorName: performer?.name ?? "An administrator",
+        expiresInHours: ttlHours,
+      }),
+    },
+  ]);
 
   return { ok: true, resetToken: token, expiresInHours: ttlHours };
 }

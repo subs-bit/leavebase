@@ -146,8 +146,8 @@ export async function submitRequest(
   });
 
   const firstStep = evaluation.routing[0];
+  const applicant = await db.user.findUnique({ where: { id: userId }, select: { name: true, email: true, designation: true } });
   if (firstStep?.approverId) {
-    const applicant = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
     await notify({
       userId: firstStep.approverId,
       kind: "REQUEST_SUBMITTED",
@@ -155,6 +155,43 @@ export async function submitRequest(
       body: `${fmtRange(draft.start, draft.end)} · ${pluralDays(evaluation.chargedDays)}`,
       link: `/requests/${request.id}`,
     });
+  }
+
+  if (applicant) {
+    const {
+      leaveSubmittedToApproverEmail, leaveSubmittedToApplicantEmail,
+    } = await import("@/lib/email/templates");
+    const { balanceLinesAsOf, leaveNotificationRecipients, fireEmails } = await import("@/lib/email/context");
+    const dateRange = fmtRange(draft.start, draft.end);
+    const balance = await balanceLinesAsOf(userId, draft.start);
+    const extraApprover = evaluation.routing[1];
+
+    const applicantEmail = leaveSubmittedToApplicantEmail({
+      applicantFirstName: applicant.name.split(" ")[0],
+      leaveTypeCode: draft.leaveType,
+      dateRange, days: evaluation.chargedDays, reason: draft.reason.trim(),
+      approverName: firstStep?.approverName ?? "your approver",
+      balance, lopDays: evaluation.lopDays, requestId: request.id,
+    });
+
+    const approverRecipients = await leaveNotificationRecipients(userId);
+    fireEmails([
+      { to: { userId, name: applicant.name, email: applicant.email }, ...applicantEmail },
+      ...approverRecipients.map((r) => ({
+        to: r,
+        ...leaveSubmittedToApproverEmail({
+          approverFirstName: r.name.split(" ")[0],
+          applicantName: applicant.name,
+          applicantDesignation: applicant.designation,
+          leaveTypeCode: draft.leaveType,
+          dateRange, days: evaluation.chargedDays, reason: draft.reason.trim(),
+          noticeDays: evaluation.noticeDays,
+          balanceOnDate: balance, lopDays: evaluation.lopDays,
+          extraApprover: extraApprover?.approverName,
+          requestId: request.id,
+        }),
+      })),
+    ]);
   }
 
   return { ok: true, requestId: request.id };
@@ -242,6 +279,36 @@ export async function decideRequest(
       body: `${fmtRange(dayKey(request.startDate), dayKey(request.endDate))}${comment.trim() ? ` — "${comment.trim()}"` : ""}`,
       link: `/requests/${requestId}`,
     });
+
+    const decidedUser = await db.user.findUnique({ where: { id: request.userId }, select: { email: true } });
+    if (decidedUser) {
+      const { leaveDecisionEmail } = await import("@/lib/email/templates");
+      const { balanceLinesAsOf, leaveNotificationRecipients, fireEmails, todayKey } = await import("@/lib/email/context");
+      const dateRange = fmtRange(dayKey(request.startDate), dayKey(request.endDate));
+      const balance = await balanceLinesAsOf(request.userId, todayKey());
+      const copyRecipients = await leaveNotificationRecipients(request.userId);
+
+      fireEmails([
+        {
+          to: { userId: request.userId, name: request.user.name, email: decidedUser.email },
+          ...leaveDecisionEmail({
+            recipientFirstName: request.user.name.split(" ")[0], isApplicant: true,
+            applicantName: request.user.name, decision: newStatus, deciderName: approver?.name ?? "your approver",
+            leaveTypeCode: request.leaveType, dateRange, days: request.chargedDays,
+            comment: comment.trim() || undefined, balance, requestId,
+          }),
+        },
+        ...copyRecipients.map((r) => ({
+          to: r,
+          ...leaveDecisionEmail({
+            recipientFirstName: r.name.split(" ")[0], isApplicant: false,
+            applicantName: request.user.name, decision: newStatus, deciderName: approver?.name ?? "your approver",
+            leaveTypeCode: request.leaveType, dateRange, days: request.chargedDays,
+            comment: comment.trim() || undefined, balance, requestId,
+          }),
+        })),
+      ]);
+    }
   } else {
     const next = currentStep(updatedSteps);
     if (next?.approverId) {
@@ -342,7 +409,7 @@ export async function cancelRequest(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const request = await db.leaveRequest.findUnique({
     where: { id: requestId },
-    include: { user: { select: { name: true } }, approvals: true },
+    include: { user: { select: { name: true, email: true } }, approvals: true },
   });
   if (!request) return { ok: false, error: "Request not found." };
   if (["CANCELLED", "WITHDRAWN", "REJECTED"].includes(request.status)) {
@@ -425,6 +492,33 @@ export async function cancelRequest(
       body: `${fmtRange(dayKey(request.startDate), dayKey(request.endDate))} — ${reason.trim()}. If you proceed to take this leave it will be treated as unauthorised (§16).`,
       link: `/requests/${requestId}`,
     });
+
+    const { leaveCancelledEmail } = await import("@/lib/email/templates");
+    const { balanceLinesAsOf, leaveNotificationRecipients, fireEmails, todayKey } = await import("@/lib/email/context");
+    const dateRange = fmtRange(dayKey(request.startDate), dayKey(request.endDate));
+    const balance = await balanceLinesAsOf(request.userId, todayKey());
+    const copyRecipients = await leaveNotificationRecipients(request.userId);
+
+    fireEmails([
+      {
+        to: { userId: request.userId, name: request.user.name, email: request.user.email },
+        ...leaveCancelledEmail({
+          recipientFirstName: request.user.name.split(" ")[0], isApplicant: true,
+          applicantName: request.user.name, actorName: actor.name,
+          leaveTypeCode: request.leaveType, dateRange, days: request.chargedDays,
+          reason: reason.trim(), balance, requestId,
+        }),
+      },
+      ...copyRecipients.map((r) => ({
+        to: r,
+        ...leaveCancelledEmail({
+          recipientFirstName: r.name.split(" ")[0], isApplicant: false,
+          applicantName: request.user.name, actorName: actor.name,
+          leaveTypeCode: request.leaveType, dateRange, days: request.chargedDays,
+          reason: reason.trim(), balance, requestId,
+        }),
+      })),
+    ]);
   }
 
   return { ok: true };
@@ -645,6 +739,25 @@ export async function claimCompOff(
       body: `Worked ${label} on ${fmtDate(workedDate)} — expires ${fmtDate(expiresAt)} if not used.`,
       link: "/comp-off",
     });
+
+    const approverUser = await db.user.findUnique({ where: { id: user.managerId }, select: { name: true, email: true } });
+    if (approverUser) {
+      const { compOffClaimedEmail } = await import("@/lib/email/templates");
+      const { fireEmails } = await import("@/lib/email/context");
+      fireEmails([
+        {
+          to: { userId: user.managerId, name: approverUser.name, email: approverUser.email },
+          ...compOffClaimedEmail({
+            approverFirstName: approverUser.name.split(" ")[0],
+            employeeName: user.name,
+            workedDate: fmtDate(workedDate),
+            workedDayLabel: label,
+            expiresDate: fmtDate(expiresAt),
+            claimId: credit.id,
+          }),
+        },
+      ]);
+    }
   }
 
   await audit({
@@ -663,7 +776,7 @@ export async function decideCompOff(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const credit = await db.compOffCredit.findUnique({
     where: { id: creditId },
-    include: { user: { select: { name: true, managerId: true } } },
+    include: { user: { select: { name: true, email: true, managerId: true } } },
   });
   if (!credit) return { ok: false, error: "Claim not found." };
   if (credit.status !== "PENDING") return { ok: false, error: "This claim has already been decided." };
@@ -714,6 +827,22 @@ export async function decideCompOff(
     summary: `${action === "APPROVED" ? "Approved" : "Rejected"} ${credit.user.name}'s comp-off for ${fmtDate(dayKey(credit.workedDate))}`,
   });
 
+  const { compOffDecisionEmail } = await import("@/lib/email/templates");
+  const { fireEmails } = await import("@/lib/email/context");
+  fireEmails([
+    {
+      to: { userId: credit.userId, name: credit.user.name, email: credit.user.email },
+      ...compOffDecisionEmail({
+        employeeFirstName: credit.user.name.split(" ")[0],
+        decision: action,
+        deciderName: approver.name,
+        workedDate: fmtDate(dayKey(credit.workedDate)),
+        expiresDate: action === "APPROVED" ? fmtDate(dayKey(credit.expiresAt)) : undefined,
+        comment: action === "REJECTED" ? comment.trim() || undefined : undefined,
+      }),
+    },
+  ]);
+
   return { ok: true };
 }
 
@@ -742,6 +871,40 @@ export async function expireCompOffs(asOf: DayKey = todayKey()): Promise<number>
     });
   }
   return stale.length;
+}
+
+/** "Use it or lose it" — warns once per credit, a few days before it lapses. Idempotent. */
+export async function warnExpiringCompOffs(asOf: DayKey = todayKey(), withinDays = 3): Promise<number> {
+  const soon = await db.compOffCredit.findMany({
+    where: {
+      status: "APPROVED",
+      expiryWarnedAt: null,
+      expiresAt: { gte: fromKey(asOf), lte: fromKey(addDaysKey(asOf, withinDays)) },
+    },
+    include: { user: { select: { name: true, email: true } } },
+  });
+  if (soon.length === 0) return 0;
+
+  const { compOffExpiringEmail } = await import("@/lib/email/templates");
+  const { fireEmails } = await import("@/lib/email/context");
+  const { diffDays } = await import("@/lib/date");
+
+  for (const c of soon) {
+    await db.compOffCredit.update({ where: { id: c.id }, data: { expiryWarnedAt: new Date() } });
+    fireEmails([
+      {
+        to: { userId: c.userId, name: c.user.name, email: c.user.email },
+        ...compOffExpiringEmail({
+          employeeFirstName: c.user.name.split(" ")[0],
+          count: 1,
+          workedDate: fmtDate(dayKey(c.workedDate)),
+          expiresDate: fmtDate(dayKey(c.expiresAt)),
+          daysLeft: diffDays(asOf, dayKey(c.expiresAt)),
+        }),
+      },
+    ]);
+  }
+  return soon.length;
 }
 
 function safeJson(s: string): Record<string, unknown> {

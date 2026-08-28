@@ -53,5 +53,17 @@ export async function changePasswordAction(
     summary: "Changed their password; other sessions signed out",
   });
 
+  const { passwordChangedEmail } = await import("@/lib/email/templates");
+  const { fireEmails } = await import("@/lib/email/context");
+  fireEmails([
+    {
+      to: { userId: user.id, name: user.name, email: user.email },
+      ...passwordChangedEmail({
+        firstName: user.name.split(" ")[0],
+        when: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
+      }),
+    },
+  ]);
+
   return { ok: "Password changed. Other devices have been signed out." };
 }

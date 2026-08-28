@@ -1,7 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { consumeLoginToken, createSession, peekLoginToken, weakPassword, type LoginTokenPurpose } from "@/lib/auth";
+import {
+  consumeLoginToken, createSession, peekLoginToken, recordLogin, weakPassword,
+  type LoginTokenPurpose,
+} from "@/lib/auth";
 import { audit } from "@/lib/services/activity";
 
 export type SetPasswordState = { error?: string };
@@ -41,6 +44,25 @@ export async function setPasswordViaTokenAction(
         : "Set a new password via the emailed reset link",
   });
 
+  await recordLogin(result.userId);
   await createSession(result.userId);
+
+  if (purpose === "ACTIVATE") {
+    const { notifyFirstLogin } = await import("@/lib/email/context");
+    await notifyFirstLogin(result.userId).catch(() => {});
+  } else {
+    const { passwordChangedEmail } = await import("@/lib/email/templates");
+    const { fireEmails } = await import("@/lib/email/context");
+    fireEmails([
+      {
+        to: { userId: result.userId, name: check.name, email: check.email },
+        ...passwordChangedEmail({
+          firstName: check.name.split(" ")[0],
+          when: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
+        }),
+      },
+    ]);
+  }
+
   redirect("/");
 }

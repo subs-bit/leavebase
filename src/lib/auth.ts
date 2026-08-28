@@ -58,6 +58,18 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
+/**
+ * Stamps `lastLoginAt` and reports whether this is the account's first-ever login (it was null
+ * beforehand) — the signal the "welcome, you're activated" emails key off. Called at the moment
+ * of successful authentication, wherever that happens: the ordinary password form, or a one-time
+ * link that signs someone in directly.
+ */
+export async function recordLogin(userId: string): Promise<{ isFirstLogin: boolean }> {
+  const before = await db.user.findUnique({ where: { id: userId }, select: { lastLoginAt: true } });
+  await db.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
+  return { isFirstLogin: before?.lastLoginAt == null };
+}
+
 // ── one-time login links (account activation, admin password reset) ────────────
 //
 // Replaces a temporary password with a single-use, expiring link that signs someone straight to

@@ -12,7 +12,7 @@ import { LEAVE_META } from "@/lib/policy/types";
 import type { LeaveType } from "@/lib/policy/types";
 import { getPolicy } from "./context";
 import { audit, notify } from "./activity";
-import { expireCompOffs } from "./leave";
+import { expireCompOffs, warnExpiringCompOffs } from "./leave";
 
 const ACCRUING: LeaveType[] = ["CL", "SL", "PL"];
 
@@ -40,7 +40,7 @@ export async function runAccrual(
     // Founders are outside the policy — no entitlement accrues to them (see isFounder).
     where: { isActive: true, role: { not: "FOUNDER" }, ...(opts.userId ? { id: opts.userId } : {}) },
     select: {
-      id: true, name: true, joinDate: true, confirmDate: true, lastWorkingDay: true, status: true,
+      id: true, name: true, email: true, joinDate: true, confirmDate: true, lastWorkingDay: true, status: true,
     },
   });
 
@@ -57,6 +57,7 @@ export async function runAccrual(
     });
 
     let userPosted = false;
+    const creditedTypes: string[] = []; // genuine new credit, not a cadence-correction clawback
     for (const type of ACCRUING) {
       const gap = accrualGap(type, entries, emp, ly, cfg, asOf);
       if (gap === 0) continue;
@@ -83,11 +84,32 @@ export async function runAccrual(
       });
       posted++;
       userPosted = true;
+      if (gap > 0) creditedTypes.push(type);
     }
     if (userPosted) touched++;
+
+    // A cadence correction alone (no genuine new credit) doesn't warrant its own email — that's
+    // covered by the accrual-cadence setting itself, not a routine "leave landed" moment.
+    if (creditedTypes.length > 0) {
+      const { accrualPostedEmail } = await import("@/lib/email/templates");
+      const { balanceLinesAsOf, fireEmails } = await import("@/lib/email/context");
+      const balance = await balanceLinesAsOf(u.id, asOf);
+      fireEmails([
+        {
+          to: { userId: u.id, name: u.name, email: u.email },
+          ...accrualPostedEmail({
+            employeeFirstName: u.name.split(" ")[0],
+            periodLabel: period.label,
+            leaveYearLabel: ly.label,
+            balance,
+          }),
+        },
+      ]);
+    }
   }
 
   await expireCompOffs(asOf);
+  await warnExpiringCompOffs(asOf);
   return { posted, users: touched };
 }
 
@@ -276,7 +298,7 @@ export async function detectAbsence(
 
       const hrUsers = await db.user.findMany({
         where: { role: { in: ["HR", "ADMIN"] }, isActive: true },
-        select: { id: true },
+        select: { id: true, name: true, email: true },
       });
       for (const hr of hrUsers) {
         await notify({
@@ -290,6 +312,23 @@ export async function detectAbsence(
           link: `/employees/${userId}`,
         });
       }
+
+      const { absenceFlaggedEmail } = await import("@/lib/email/templates");
+      const { fireEmails } = await import("@/lib/email/context");
+      fireEmails(
+        hrUsers.map((hr) => ({
+          to: { userId: hr.id, name: hr.name, email: hr.email },
+          ...absenceFlaggedEmail({
+            recipientFirstName: hr.name.split(" ")[0],
+            employeeName: rec.name,
+            severity,
+            workingDays,
+            dateRange: `${fmtDate(fromDate)} – ${fmtDate(toDate)}`,
+            abscondingThreshold: cfg.abscondingDays,
+            employeeId: userId,
+          }),
+        })),
+      );
     }
   }
 

@@ -211,6 +211,8 @@ model CompOffCredit {
   consumedById  String?
   consumedBy    LeaveRequest? @relation("CompOffConsumed", fields: [consumedById], references: [id], onDelete: SetNull)
   leaveYear     String
+  /// Set once the "use it before it lapses" email has gone out, so it's only ever sent once.
+  expiryWarnedAt DateTime?
   createdAt     DateTime @default(now())
 
   @@index([userId, status])
