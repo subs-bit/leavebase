@@ -3,8 +3,21 @@ import { writeFileSync } from "node:fs";
 import {
   leaveSubmittedToApproverEmail, leaveSubmittedToApplicantEmail, leaveDecisionEmail,
   leaveCancelledEmail, newEmployeeWelcomeEmail, firstLoginWelcomeEmail, firstLoginTeamEmail,
-  passwordResetEmail, passwordChangedEmail,
+  passwordResetEmail, passwordChangedEmail, compOffClaimedEmail, compOffDecisionEmail,
+  compOffExpiringEmail, employeeConfirmedEmail, absenceFlaggedEmail, balanceAdjustedEmail,
+  accrualPostedEmail,
 } from "../src/lib/email/templates";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// The real templates reference the hosted production logo, which is correct for real email —
+// but the artifact preview sandbox blocks remote images, so swap in a data URI for preview only.
+const LOGO_URL = "https://leavebase.prismixstudios.in/icon-192.png";
+const logoDataUri = (() => {
+  const bytes = readFileSync(join(__dirname, "..", "public", "icon-192.png"));
+  return `data:image/png;base64,${bytes.toString("base64")}`;
+})();
+const forPreview = (html: string) => html.split(LOGO_URL).join(logoDataUri);
 
 const outFile = process.argv[2];
 if (!outFile) throw new Error("usage: build-email-gallery.ts <outFile>");
@@ -76,10 +89,11 @@ const items: Item[] = [
     }),
   },
   {
-    id: "08", group: "Account", label: "New employee — welcome + temp password", to: "Kabir Shah",
+    id: "08", group: "Account", label: "New employee — welcome + set-password link", to: "Kabir Shah",
     ...newEmployeeWelcomeEmail({
-      firstName: "Kabir", email: "kabir.shah@prismixstudios.com", tempPassword: "Pr1sm-7fQk2",
-      designation: "Compositor",
+      firstName: "Kabir", email: "kabir.shah@prismixstudios.com",
+      activationUrl: "https://leavebase.prismixstudios.in/activate/sample-token",
+      designation: "Compositor", expiresInHours: 48,
     }),
   },
   {
@@ -94,17 +108,75 @@ const items: Item[] = [
     }),
   },
   {
-    id: "11", group: "Account", label: "Password reset (by admin)", to: "Aryan Gupta",
+    id: "11", group: "Account", label: "Password reset — set-password link", to: "Aryan Gupta",
     ...passwordResetEmail({
-      firstName: "Aryan", email: "aryan.gupta@prismixstudios.com", tempPassword: "Pr1sm-9xLm4",
-      actorName: "Ashish Parpani",
+      firstName: "Aryan", email: "aryan.gupta@prismixstudios.com",
+      resetUrl: "https://leavebase.prismixstudios.in/reset/sample-token",
+      actorName: "Ashish Parpani", expiresInHours: 2,
     }),
   },
   {
     id: "12", group: "Account", label: "Password changed (confirmation)", to: "Aryan Gupta",
     ...passwordChangedEmail({ firstName: "Aryan", when: "28 Aug 2026, 4:12 PM" }),
   },
-];
+  {
+    id: "13", group: "Comp-off", label: "Claimed — to approver", to: "Neha Bhat (Reporting Manager)",
+    ...compOffClaimedEmail({
+      approverFirstName: "Neha", employeeName: "Aryan Gupta", workedDate: "9 Aug 2026",
+      workedDayLabel: "a declared holiday", expiresDate: "29 Aug 2026", claimId: "sample",
+    }),
+  },
+  {
+    id: "14", group: "Comp-off", label: "Approved — to employee", to: "Aryan Gupta",
+    ...compOffDecisionEmail({
+      employeeFirstName: "Aryan", decision: "APPROVED", deciderName: "Neha Bhat",
+      workedDate: "9 Aug 2026", expiresDate: "29 Aug 2026",
+    }),
+  },
+  {
+    id: "15", group: "Comp-off", label: "Expiring soon", to: "Aryan Gupta",
+    ...compOffExpiringEmail({
+      employeeFirstName: "Aryan", count: 1, workedDate: "9 Aug 2026",
+      expiresDate: "29 Aug 2026", daysLeft: 3,
+    }),
+  },
+  {
+    id: "16", group: "Employment", label: "Employee confirmed", to: "Meera Iyer",
+    ...employeeConfirmedEmail({
+      employeeFirstName: "Meera", confirmDate: "1 Sep 2026",
+      balance: [{ type: "CL", before: 3 }, { type: "SL", before: 3 }, { type: "PL", before: 0 }],
+    }),
+  },
+  {
+    id: "17", group: "Absence (§12)", label: "Warning", to: "Ashish Parpani (HR)",
+    ...absenceFlaggedEmail({
+      recipientFirstName: "Ashish", employeeName: "Rohan Vats", severity: "WARNING",
+      workingDays: 4, dateRange: "24–27 Aug 2026", abscondingThreshold: 7, employeeId: "sample",
+    }),
+  },
+  {
+    id: "18", group: "Absence (§12)", label: "Absconding threshold reached", to: "Ashish Parpani (HR)",
+    ...absenceFlaggedEmail({
+      recipientFirstName: "Ashish", employeeName: "Rohan Vats", severity: "ABSCONDING",
+      workingDays: 8, dateRange: "20–29 Aug 2026", abscondingThreshold: 7, employeeId: "sample",
+    }),
+  },
+  {
+    id: "19", group: "HR corrections", label: "Balance manually adjusted", to: "Aryan Gupta",
+    ...balanceAdjustedEmail({
+      employeeFirstName: "Aryan", actorName: "Ashish Parpani", leaveTypeCode: "SL", amount: 2,
+      note: "Carried over from previous HR system at onboarding.",
+      balance: [{ type: "SL", before: 4.5, after: 6.5 }],
+    }),
+  },
+  {
+    id: "20", group: "HR corrections", label: "Quarterly accrual posted", to: "Aryan Gupta",
+    ...accrualPostedEmail({
+      employeeFirstName: "Aryan", periodLabel: "Q2", leaveYearLabel: "2026-27",
+      balance: [{ type: "CL", before: 3 }, { type: "SL", before: 3 }, { type: "PL", before: 7.5 }],
+    }),
+  },
+].map((item) => ({ ...item, html: forPreview(item.html) }));
 
 const dataJson = JSON.stringify(items);
 

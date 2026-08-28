@@ -174,32 +174,26 @@ export function leaveCancelledEmail(d: {
 export function newEmployeeWelcomeEmail(d: {
   firstName: string;
   email: string;
-  tempPassword: string;
+  activationUrl: string;
   designation: string;
+  expiresInHours: number;
 }): EmailResult {
   return {
     subject: "Welcome to LeaveBase, " + d.firstName,
     html: emailShell({
-      preheader: "Your LeaveBase account is ready — here's your temporary password and how to get started.",
+      preheader: "Your LeaveBase account is ready — set your password to get started.",
       bodyHtml: `
         ${heading(`Welcome, ${d.firstName}`)}
-        ${lede(`You've been added to <strong>LeaveBase</strong>, Prismix Studios' leave management system, as <strong>${d.designation}</strong>. Here's everything you need to sign in.`)}
-        ${card(`
-          <p style="margin:0 0 10px;font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:${COLOR.ink400};">Your sign-in details</p>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr><td style="padding:5px 0;font-size:12.5px;color:${COLOR.ink500};">Work email</td><td style="padding:5px 0;font-size:13px;font-weight:700;color:${COLOR.ink900};text-align:right;">${d.email}</td></tr>
-            <tr><td style="padding:5px 0;font-size:12.5px;color:${COLOR.ink500};">Temporary password</td><td style="padding:5px 0;text-align:right;"><code style="font-family:'SF Mono',Consolas,monospace;font-size:13px;font-weight:700;background:${COLOR.brand50};color:${COLOR.brand500};padding:3px 9px;border-radius:6px;letter-spacing:0.02em;">${d.tempPassword}</code></td></tr>
-          </table>
-        `)}
-        ${calloutWarn("This password works once. The moment you sign in, LeaveBase will ask you to set your own — don't forward this email once you've done that.")}
-        <p style="margin:24px 0 10px;font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:${COLOR.ink400};">Getting started</p>
+        ${lede(`You've been added to <strong>LeaveBase</strong>, Prismix Studios' leave management system, as <strong>${d.designation}</strong>. One step to get in — set your own password, no temporary one to remember.`)}
+        ${ctaButton("Set your password", d.activationUrl)}
+        ${paragraph(`This link signs in as <strong style="color:${COLOR.ink700};">${d.email}</strong> and expires in ${d.expiresInHours} hours, for one use only. If it's expired by the time you get to it, ask HR to send a fresh one.`, { muted: true, marginTop: 16 })}
+        <p style="margin:26px 0 10px;font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:${COLOR.ink400};">What happens next</p>
         ${detailRows([
-          ["1", `Go to <a href="${APP_URL}/login" style="color:${COLOR.brand500};font-weight:700;text-decoration:none;">${APP_URL.replace("https://", "")}</a> and sign in with the details above.`],
-          ["2", "Set a new password when prompted — it replaces the temporary one immediately."],
-          ["3", "Your leave balance is already waiting on your dashboard, pro-rated from your joining date."],
+          ["1", "Choose a password on the page the link opens."],
+          ["2", "You're straight into your dashboard — no separate sign-in step."],
+          ["3", "Your leave balance is already waiting, pro-rated from your joining date."],
           ["4", "Apply for leave any time from “Apply for leave” — approvals route automatically to the right person."],
         ])}
-        ${ctaButton("Sign in to LeaveBase", `${APP_URL}/login`)}
         ${paragraph("Questions about the policy or how anything works? Your reporting manager or HR can help.", { muted: true, marginTop: 20 })}
       `,
     }),
@@ -255,25 +249,21 @@ export function firstLoginTeamEmail(d: {
 export function passwordResetEmail(d: {
   firstName: string;
   email: string;
-  tempPassword: string;
+  resetUrl: string;
   actorName: string;
+  expiresInHours: number;
 }): EmailResult {
   return {
     subject: "Your LeaveBase password has been reset",
     html: emailShell({
-      preheader: `${d.actorName} reset your password — here's your temporary one.`,
+      preheader: `${d.actorName} reset your password — set a new one to get back in.`,
       bodyHtml: `
         ${badge("Security", "warning")}
         ${heading("Your password was reset")}
-        ${lede(`Hi ${d.firstName}, <strong>${d.actorName}</strong> reset your LeaveBase password. Use the temporary one below to sign in.`)}
-        ${card(`
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr><td style="padding:5px 0;font-size:12.5px;color:${COLOR.ink500};">Work email</td><td style="padding:5px 0;font-size:13px;font-weight:700;color:${COLOR.ink900};text-align:right;">${d.email}</td></tr>
-            <tr><td style="padding:5px 0;font-size:12.5px;color:${COLOR.ink500};">Temporary password</td><td style="padding:5px 0;text-align:right;"><code style="font-family:'SF Mono',Consolas,monospace;font-size:13px;font-weight:700;background:${COLOR.brand50};color:${COLOR.brand500};padding:3px 9px;border-radius:6px;letter-spacing:0.02em;">${d.tempPassword}</code></td></tr>
-          </table>
-        `)}
+        ${lede(`Hi ${d.firstName}, <strong>${d.actorName}</strong> reset your LeaveBase password. Set a new one to get back in — nothing to type or copy.`)}
+        ${ctaButton("Set a new password", d.resetUrl)}
+        ${paragraph(`This link signs in as <strong style="color:${COLOR.ink700};">${d.email}</strong> and expires in ${d.expiresInHours} hours, for one use only.`, { muted: true, marginTop: 16 })}
         ${calloutWarn(`<strong>Didn't ask for this?</strong> Contact HR immediately — someone with access to your record triggered it.`)}
-        ${ctaButton("Sign in and set a new password", `${APP_URL}/login`)}
       `,
     }),
   };
@@ -289,6 +279,194 @@ export function passwordChangedEmail(d: { firstName: string; when: string }): Em
         ${heading("Password changed")}
         ${lede(`Hi ${d.firstName}, this confirms your LeaveBase password was changed on <strong>${d.when}</strong>.`)}
         ${calloutWarn(`<strong>Wasn't you?</strong> Contact HR immediately so your access can be secured.`)}
+      `,
+    }),
+  };
+}
+
+// ── comp-off (§11) ──────────────────────────────────────────────────────────────
+
+export function compOffClaimedEmail(d: {
+  approverFirstName: string;
+  employeeName: string;
+  workedDate: string;
+  workedDayLabel: string;
+  expiresDate: string;
+  claimId: string;
+}): EmailResult {
+  return {
+    subject: `${d.employeeName} claimed a comp-off — ${d.workedDate}`,
+    html: emailShell({
+      preheader: `${d.employeeName} worked ${d.workedDayLabel} on ${d.workedDate} and claimed a comp-off for it.`,
+      bodyHtml: `
+        ${badge("Needs a decision", "info")}
+        ${heading("Comp-off claim")}
+        ${lede(`Hi ${d.approverFirstName}, <strong>${d.employeeName}</strong> worked <strong>${d.workedDayLabel}</strong> on ${d.workedDate} and has claimed a compensatory day off for it.`)}
+        ${detailRows([
+          ["Worked", `${d.workedDate} — ${d.workedDayLabel}`],
+          ["Expires", `${d.expiresDate}, if not used (§11)`],
+        ])}
+        ${ctaButton("Review claim", `${APP_URL}/comp-off`)}
+      `,
+    }),
+  };
+}
+
+export function compOffDecisionEmail(d: {
+  employeeFirstName: string;
+  decision: "APPROVED" | "REJECTED";
+  deciderName: string;
+  workedDate: string;
+  expiresDate?: string;
+  comment?: string;
+}): EmailResult {
+  const approved = d.decision === "APPROVED";
+  return {
+    subject: `Your comp-off claim was ${approved ? "approved" : "rejected"}`,
+    html: emailShell({
+      preheader: `${d.deciderName} ${approved ? "approved" : "rejected"} your comp-off claim for ${d.workedDate}.`,
+      bodyHtml: `
+        ${badge(approved ? "Approved" : "Rejected", approved ? "success" : "danger")}
+        ${heading(approved ? "Comp-off approved" : "Comp-off rejected")}
+        ${lede(`Hi ${d.employeeFirstName}, <strong>${d.deciderName}</strong> ${approved ? "approved" : "rejected"} your comp-off claim for working <strong>${d.workedDate}</strong>.`)}
+        ${
+          approved
+            ? detailRows([["Valid until", `${d.expiresDate} — use it before then (§11)`]])
+            : d.comment
+              ? detailRows([["Reason", d.comment]])
+              : ""
+        }
+        ${ctaButton("View comp-off", `${APP_URL}/comp-off`)}
+      `,
+    }),
+  };
+}
+
+export function compOffExpiringEmail(d: {
+  employeeFirstName: string;
+  count: number;
+  workedDate: string;
+  expiresDate: string;
+  daysLeft: number;
+}): EmailResult {
+  return {
+    subject: `Your comp-off expires in ${d.daysLeft} ${d.daysLeft === 1 ? "day" : "days"} — use it or lose it`,
+    html: emailShell({
+      preheader: `Your comp-off from ${d.workedDate} expires ${d.expiresDate}.`,
+      bodyHtml: `
+        ${badge("Expiring soon", "warning")}
+        ${heading("Use it before it lapses")}
+        ${lede(`Hi ${d.employeeFirstName}, you have <strong>${fmtDaysHtml(d.count)}</strong> of comp-off from working <strong>${d.workedDate}</strong>, expiring <strong>${d.expiresDate}</strong> — ${d.daysLeft} ${d.daysLeft === 1 ? "day" : "days"} away. Comp-off doesn't carry forward (§11).`)}
+        ${ctaButton("Use it now", `${APP_URL}/comp-off`)}
+      `,
+    }),
+  };
+}
+
+// ── employment ────────────────────────────────────────────────────────────────
+
+export function employeeConfirmedEmail(d: {
+  employeeFirstName: string;
+  confirmDate: string;
+  balance: BalanceLine[];
+}): EmailResult {
+  return {
+    subject: "You've been confirmed at Prismix Studios",
+    html: emailShell({
+      preheader: "Congratulations — you're confirmed, and Privileged Leave is now available to you.",
+      bodyHtml: `
+        ${badge("Confirmed", "success")}
+        ${heading("Congratulations!")}
+        ${lede(`Hi ${d.employeeFirstName}, you've been confirmed at Prismix Studios effective <strong>${d.confirmDate}</strong>. Privileged Leave is now available to you, credited pro-rata from today (§6, §7).`)}
+        ${balanceBlock(d.balance, "Your balance now")}
+        ${ctaButton("View your balance", `${APP_URL}/requests?tab=balance`)}
+      `,
+    }),
+  };
+}
+
+// ── absence (§12) ────────────────────────────────────────────────────────────────
+
+export function absenceFlaggedEmail(d: {
+  recipientFirstName: string;
+  employeeName: string;
+  severity: "WARNING" | "ABSCONDING";
+  workingDays: number;
+  dateRange: string;
+  abscondingThreshold: number;
+  employeeId: string;
+}): EmailResult {
+  const abs = d.severity === "ABSCONDING";
+  return {
+    subject: abs
+      ? `${d.employeeName} — absconding threshold reached`
+      : `${d.employeeName} — unauthorised absence flagged`,
+    html: emailShell({
+      preheader: `${d.workingDays} consecutive working days of unauthorised absence recorded for ${d.employeeName}.`,
+      bodyHtml: `
+        ${badge(abs ? "Absconding threshold" : "Absence warning", abs ? "danger" : "warning")}
+        ${heading(abs ? "Absconding threshold reached" : "Unauthorised absence flagged")}
+        ${lede(`Hi ${d.recipientFirstName}, <strong>${d.employeeName}</strong> has ${fmtDaysHtml(d.workingDays)} of recorded unauthorised absence, ${d.dateRange}.`)}
+        ${
+          abs
+            ? calloutWarn(`Section 12 treats ${d.abscondingThreshold} or more consecutive working days as absconding — the decision rests with HR, not the system.`)
+            : calloutWarn(`The absconding threshold under section 12 is ${d.abscondingThreshold} working days.`)
+        }
+        ${ctaButton("Review employee record", `${APP_URL}/employees/${d.employeeId}`)}
+      `,
+    }),
+  };
+}
+
+// ── HR corrections ───────────────────────────────────────────────────────────────
+
+export function balanceAdjustedEmail(d: {
+  employeeFirstName: string;
+  actorName: string;
+  leaveTypeCode: string;
+  amount: number;
+  note: string;
+  balance: BalanceLine[];
+}): EmailResult {
+  const meta = LEAVE_COLOR[d.leaveTypeCode];
+  const sign = d.amount > 0 ? "+" : "";
+  return {
+    subject: `Your ${meta.name} balance was adjusted`,
+    html: emailShell({
+      preheader: `${d.actorName} adjusted your ${meta.name} balance by ${sign}${d.amount} days.`,
+      bodyHtml: `
+        ${badge("Manual correction", "info")}
+        ${heading("Balance adjusted")}
+        ${lede(`Hi ${d.employeeFirstName}, <strong>${d.actorName}</strong> made a manual correction to your <strong style="color:${meta.ink};">${meta.name}</strong> balance.`)}
+        ${detailRows([
+          ["Adjustment", `<span style="color:${d.amount > 0 ? COLOR.successInk : COLOR.dangerInk};">${sign}${d.amount} days</span>`],
+          ["Reason", d.note],
+        ])}
+        ${balanceBlock(d.balance, `Your ${meta.name} balance now`)}
+        ${paragraph("This is a ledger entry, not an overwrite — your original accrual and usage stay visible in your statement.", { muted: true, marginTop: 16 })}
+        ${ctaButton("View your balance", `${APP_URL}/requests?tab=balance`)}
+      `,
+    }),
+  };
+}
+
+// ── accrual (§7) ─────────────────────────────────────────────────────────────────
+
+export function accrualPostedEmail(d: {
+  employeeFirstName: string;
+  periodLabel: string;
+  leaveYearLabel: string;
+  balance: BalanceLine[];
+}): EmailResult {
+  return {
+    subject: `Your ${d.periodLabel} leave credit has landed`,
+    html: emailShell({
+      preheader: `Your ${d.leaveYearLabel} ${d.periodLabel} accrual has been credited.`,
+      bodyHtml: `
+        ${heading("Leave credited")}
+        ${lede(`Hi ${d.employeeFirstName}, your <strong>${d.periodLabel} ${d.leaveYearLabel}</strong> leave accrual has been credited (§7).`)}
+        ${balanceBlock(d.balance, "Your balance now")}
+        ${paragraph("This happens automatically each quarter — nothing for you to do.", { muted: true, marginTop: 16 })}
       `,
     }),
   };
