@@ -2,7 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { dayKey, DayKey, fromKey, todayKey } from "@/lib/date";
-import { hashPassword } from "@/lib/auth";
+import { hashPassword, issueLoginToken, randomToken } from "@/lib/auth";
 import { audit, notify } from "./activity";
 import { getPolicy } from "./context";
 import { runAccrual } from "./accrual";
@@ -28,20 +28,10 @@ export type PersonInput = {
 };
 
 export type PersonResult =
-  | { ok: true; userId: string; tempPassword?: string }
+  | { ok: true; userId: string; activationToken?: string; activationExpiresInHours?: number }
   | { ok: false; error: string };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Readable temporary password — unambiguous characters only, so it survives being read aloud. */
-export function generateTempPassword(): string {
-  const words = ["prism", "studio", "cobalt", "violet", "harbor", "ember", "quartz", "cedar", "lumen", "onyx"];
-  const bytes = new Uint8Array(3);
-  crypto.getRandomValues(bytes);
-  const word = words[bytes[0] % words.length];
-  const num = 100 + (((bytes[1] << 8) | bytes[2]) % 900);
-  return `${word}-${num}`;
-}
 
 function nextHue(seed: string): number {
   let h = 0;
@@ -143,14 +133,16 @@ export async function createEmployee(
 
   const email = input.email.trim().toLowerCase();
   const empCode = input.empCode?.trim() || (await nextEmpCode());
-  const tempPassword = generateTempPassword();
+  // Nobody ever sees this — the account is unusable until the emailed activation link sets a
+  // real password. Locking it with an unguessable hash rather than leaving it predictable.
+  const lockedHash = await hashPassword(randomToken());
 
   const user = await db.user.create({
     data: {
       empCode,
       name: input.name.trim(),
       email,
-      passwordHash: await hashPassword(tempPassword),
+      passwordHash: lockedHash,
       mustChangePassword: true,
       role: input.role,
       designation: input.designation.trim(),
@@ -189,7 +181,8 @@ export async function createEmployee(
     });
   }
 
-  return { ok: true, userId: user.id, tempPassword };
+  const { token, ttlHours } = await issueLoginToken(user.id, "ACTIVATE");
+  return { ok: true, userId: user.id, activationToken: token, activationExpiresInHours: ttlHours };
 }
 
 export async function updateEmployee(
@@ -352,11 +345,11 @@ export async function setEmployeeActive(
   return { ok: true, userId };
 }
 
-/** Issue a temporary password. The employee is forced to change it at next sign-in. */
+/** Locks the account and issues a one-time reset link — the old password stops working immediately. */
 export async function resetPassword(
   userId: string,
   actor: { id: string; role: string },
-): Promise<{ ok: true; tempPassword: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; resetToken: string; expiresInHours: number } | { ok: false; error: string }> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
   if (!user) return { ok: false, error: "Employee not found." };
   if (["ADMIN", "FOUNDER"].includes(user.role) && !["ADMIN", "FOUNDER"].includes(actor.role)) {
@@ -366,22 +359,24 @@ export async function resetPassword(
     };
   }
 
-  const tempPassword = generateTempPassword();
+  // Locks the account immediately (an unguessable hash nobody is ever shown) — access only
+  // returns once the emailed link is used to set a real password.
   await db.user.update({
     where: { id: userId },
-    data: { passwordHash: await hashPassword(tempPassword), mustChangePassword: true },
+    data: { passwordHash: await hashPassword(randomToken()), mustChangePassword: true },
   });
   await db.session.deleteMany({ where: { userId } });
+  const { token, ttlHours } = await issueLoginToken(userId, "RESET");
 
   await audit({
     actorId: actor.id,
     action: "PASSWORD_RESET",
     entity: "User",
     entityId: userId,
-    summary: `Issued a temporary password for ${user.name}; all their sessions were signed out`,
+    summary: `Reset ${user.name}'s password and issued a one-time reset link; all their sessions were signed out`,
   });
 
-  return { ok: true, tempPassword };
+  return { ok: true, resetToken: token, expiresInHours: ttlHours };
 }
 
 /**

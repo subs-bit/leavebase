@@ -48,8 +48,8 @@ function Submit({ label }: { label: string }) {
   );
 }
 
-/** The temp password is shown exactly once — there is no way to read it back. */
-function TempPassword({ password }: { password: string }) {
+/** The activation link is shown exactly once — there is no way to read it back. */
+function ActivationLink({ link }: { link: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div
@@ -58,19 +58,19 @@ function TempPassword({ password }: { password: string }) {
     >
       <p className="flex items-center gap-2 text-[12.5px] font-bold" style={{ color: "var(--c-success-ink)" }}>
         <KeyRound size={14} />
-        Temporary password
+        Sign-in link
       </p>
       <div className="mt-2.5 flex items-center gap-2">
         <code
-          className="flex-1 rounded-xl px-3.5 py-2.5 text-[16px] font-extrabold tracking-wide"
+          className="flex-1 truncate rounded-xl px-3.5 py-2.5 text-[12.5px] font-bold"
           style={{ background: "var(--c-surface)", color: "var(--c-ink-900)" }}
         >
-          {password}
+          {link}
         </code>
         <button
           type="button"
           onClick={() => {
-            navigator.clipboard?.writeText(password);
+            navigator.clipboard?.writeText(link);
             setCopied(true);
             setTimeout(() => setCopied(false), 1800);
           }}
@@ -82,9 +82,9 @@ function TempPassword({ password }: { password: string }) {
         </button>
       </div>
       <p className="mt-2.5 text-[11.5px] leading-snug" style={{ color: "var(--c-ink-700)" }}>
-        Hand this over in person or on a channel you trust. It is shown once and cannot be read
-        back — if it&rsquo;s lost, issue a new one from their record. They must change it the
-        moment they sign in.
+        Hand this over on a channel you trust. It is shown once and cannot be read back — if it
+        expires or is lost, issue a new one from their record. Following it lets them set their own
+        password directly; there is nothing to type or remember beforehand.
       </p>
     </div>
   );
@@ -298,12 +298,12 @@ export function PersonForm({
       )}
 
       {state.error && <PolicyNote level="BLOCK" title={state.error} />}
-      {state.ok && !state.tempPassword && <PolicyNote level="INFO" title={state.ok} />}
+      {state.ok && !state.activationLink && <PolicyNote level="INFO" title={state.ok} />}
 
-      {state.tempPassword && (
+      {state.activationLink && (
         <section className="card space-y-4 p-5 sm:p-6">
           <SectionHeader eyebrow="Done" title={state.ok ?? "Added"} />
-          <TempPassword password={state.tempPassword} />
+          <ActivationLink link={state.activationLink} />
           <div className="flex flex-wrap gap-2.5">
             {state.userId && (
               <button
@@ -325,7 +325,7 @@ export function PersonForm({
         </section>
       )}
 
-      {!state.tempPassword && (
+      {!state.activationLink && (
         <div className="flex flex-wrap gap-2.5">
           <Submit label={mode === "create" ? "Add employee" : "Save changes"} />
           <button type="button" onClick={() => router.back()} className="btn btn-ghost">

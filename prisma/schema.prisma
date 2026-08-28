@@ -67,9 +67,27 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
   flags         AbsenceFlag[]  @relation("FlaggedUser")
+  loginTokens   LoginToken[]
 
   @@index([departmentId])
   @@index([managerId])
+}
+
+/// A one-time, expiring link that signs someone straight to a "set your password" page — used for
+/// new-employee activation and admin-triggered password resets, in place of a temporary password
+/// nobody has to type or copy. Only the SHA-256 hash of the token is ever stored, same principle
+/// as passwordHash: the plaintext exists only in the URL sent by email, never at rest.
+model LoginToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  purpose   String // ACTIVATE RESET
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────────────────── calendar

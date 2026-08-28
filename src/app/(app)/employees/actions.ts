@@ -5,10 +5,11 @@ import { requireHr } from "@/lib/auth";
 import {
   createEmployee, resetPassword, setEmployeeActive, updateEmployee, type PersonInput,
 } from "@/lib/services/people";
+import { APP_URL } from "@/lib/email/shell";
 import { BALANCE_TYPES } from "@/lib/policy/types";
 import type { LeaveType, Role } from "@/lib/policy/types";
 
-export type PeopleState = { error?: string; ok?: string; tempPassword?: string; userId?: string };
+export type PeopleState = { error?: string; ok?: string; activationLink?: string; userId?: string };
 
 function readPerson(formData: FormData): PersonInput {
   const confirmDate = String(formData.get("confirmDate") ?? "");
@@ -54,8 +55,8 @@ export async function createPersonAction(
   revalidatePath("/employees");
   revalidatePath("/reports");
   return {
-    ok: "Added. Give them the temporary password below — LeaveBase will make them change it at first sign-in.",
-    tempPassword: result.tempPassword,
+    ok: "Added. Once email is connected this goes out automatically — for now, share the link below with them.",
+    activationLink: result.activationToken ? `${APP_URL}/activate/${result.activationToken}` : undefined,
     userId: result.userId,
   };
 }
@@ -101,7 +102,7 @@ export async function resetPasswordAction(
 
   revalidatePath(`/employees/${userId}`);
   return {
-    ok: "Temporary password issued. They've been signed out everywhere and must set a new one.",
-    tempPassword: result.tempPassword,
+    ok: "Password reset — they've been signed out everywhere. Once email is connected this goes out automatically — for now, share the link below with them.",
+    activationLink: `${APP_URL}/reset/${result.resetToken}`,
   };
 }

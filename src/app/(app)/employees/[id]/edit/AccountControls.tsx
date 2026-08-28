@@ -21,20 +21,20 @@ function Pending({ label, tone }: { label: string; tone: "ghost" | "danger" | "p
   );
 }
 
-function TempPassword({ password }: { password: string }) {
+function ActivationLink({ link }: { link: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="mt-3 flex items-center gap-2">
       <code
-        className="flex-1 rounded-xl px-3.5 py-2.5 text-[16px] font-extrabold tracking-wide"
+        className="flex-1 truncate rounded-xl px-3.5 py-2.5 text-[12.5px] font-bold"
         style={{ background: "var(--c-surface)", color: "var(--c-ink-900)" }}
       >
-        {password}
+        {link}
       </code>
       <button
         type="button"
         onClick={() => {
-          navigator.clipboard?.writeText(password);
+          navigator.clipboard?.writeText(link);
           setCopied(true);
           setTimeout(() => setCopied(false), 1800);
         }}
@@ -104,7 +104,7 @@ export function AccountControls({
           </div>
         </form>
         {pwState.error && <div className="mt-3"><PolicyNote level="BLOCK" title={pwState.error} /></div>}
-        {pwState.tempPassword && (
+        {pwState.activationLink && (
           <div
             className="mt-3 rounded-2xl p-4"
             style={{
@@ -116,7 +116,7 @@ export function AccountControls({
               <KeyRound size={14} />
               Shown once — copy it now
             </p>
-            <TempPassword password={pwState.tempPassword} />
+            <ActivationLink link={pwState.activationLink} />
           </div>
         )}
       </div>
