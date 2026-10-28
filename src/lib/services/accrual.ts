@@ -94,7 +94,7 @@ export async function runAccrual(
       const { accrualPostedEmail } = await import("@/lib/email/templates");
       const { balanceLinesAsOf, fireEmails } = await import("@/lib/email/context");
       const balance = await balanceLinesAsOf(u.id, asOf);
-      fireEmails([
+      await fireEmails([
         {
           to: { userId: u.id, name: u.name, email: u.email },
           ...accrualPostedEmail({
@@ -315,7 +315,7 @@ export async function detectAbsence(
 
       const { absenceFlaggedEmail } = await import("@/lib/email/templates");
       const { fireEmails } = await import("@/lib/email/context");
-      fireEmails(
+      await fireEmails(
         hrUsers.map((hr) => ({
           to: { userId: hr.id, name: hr.name, email: hr.email },
           ...absenceFlaggedEmail({

@@ -68,15 +68,21 @@ export async function leaveNotificationRecipients(employeeUserId: string): Promi
 export const orgLeadershipRecipients = leaveNotificationRecipients;
 
 /**
- * Fires every email in `templates` off in the background — never awaited by the caller, and any
- * failure is swallowed (and logged by `sendEmail` itself). The app's real work — posting the
- * ledger entry, recording the decision — must never wait on or be blocked by an email provider.
+ * Sends every email in `templates` in parallel and waits for them all to finish. Callers must
+ * `await` this: on a serverless host the function can be frozen the instant its response goes out,
+ * so a send left running in the background may never reach the provider (this is exactly how
+ * password-reset emails were being lost — nothing came after them to keep the function alive).
+ * A failed send still never throws — `sendEmail` logs it and returns — so an email provider
+ * outage can slow a request by a moment but never break it.
  */
-export function fireEmails(templates: Array<{ to: Recipient; subject: string; html: string } | null>): void {
-  for (const t of templates) {
-    if (!t) continue;
-    sendEmail({ to: [{ email: t.to.email, name: t.to.name }], subject: t.subject, html: t.html }).catch(() => {});
-  }
+export async function fireEmails(
+  templates: Array<{ to: Recipient; subject: string; html: string } | null>,
+): Promise<void> {
+  await Promise.allSettled(
+    templates
+      .filter((t): t is NonNullable<typeof t> => !!t)
+      .map((t) => sendEmail({ to: [{ email: t.to.email, name: t.to.name }], subject: t.subject, html: t.html })),
+  );
 }
 
 /** The pair of emails a brand-new activation fires: a welcome to the person, a heads-up to leadership. */
@@ -90,7 +96,7 @@ export async function notifyFirstLogin(userId: string): Promise<void> {
   const { firstLoginWelcomeEmail, firstLoginTeamEmail } = await import("./templates");
   const teamRecipients = await orgLeadershipRecipients(userId);
 
-  fireEmails([
+  await fireEmails([
     {
       to: { userId, name: user.name, email: user.email },
       ...firstLoginWelcomeEmail({ firstName: user.name.split(" ")[0] }),

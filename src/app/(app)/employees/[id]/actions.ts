@@ -70,7 +70,7 @@ export async function adjustBalanceAction(_prev: HrState, formData: FormData): P
     // re-querying, since the ledger already moved on.
     const balanceNow = await balanceLinesAsOf(userId, today);
     const after = balanceNow.find((b) => b.type === leaveType)?.before ?? 0;
-    fireEmails([
+    await fireEmails([
       {
         to: { userId, name: target.name, email: target.email },
         ...balanceAdjustedEmail({
@@ -123,7 +123,7 @@ export async function confirmEmployeeAction(_prev: HrState, formData: FormData):
   const { balanceLinesAsOf, fireEmails, todayKey: todayKeyFn } = await import("@/lib/email/context");
   const { fmtDate } = await import("@/lib/date");
   const balance = await balanceLinesAsOf(userId, todayKeyFn());
-  fireEmails([
+  await fireEmails([
     {
       to: { userId, name: target.name, email: target.email },
       ...employeeConfirmedEmail({

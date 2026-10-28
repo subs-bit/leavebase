@@ -55,7 +55,7 @@ export async function changePasswordAction(
 
   const { passwordChangedEmail } = await import("@/lib/email/templates");
   const { fireEmails } = await import("@/lib/email/context");
-  fireEmails([
+  await fireEmails([
     {
       to: { userId: user.id, name: user.name, email: user.email },
       ...passwordChangedEmail({

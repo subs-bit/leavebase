@@ -53,7 +53,7 @@ export async function setPasswordViaTokenAction(
   } else {
     const { passwordChangedEmail } = await import("@/lib/email/templates");
     const { fireEmails } = await import("@/lib/email/context");
-    fireEmails([
+    await fireEmails([
       {
         to: { userId: result.userId, name: check.name, email: check.email },
         ...passwordChangedEmail({

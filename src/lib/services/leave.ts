@@ -175,7 +175,7 @@ export async function submitRequest(
     });
 
     const approverRecipients = await leaveNotificationRecipients(userId);
-    fireEmails([
+    await fireEmails([
       { to: { userId, name: applicant.name, email: applicant.email }, ...applicantEmail },
       ...approverRecipients.map((r) => ({
         to: r,
@@ -288,7 +288,7 @@ export async function decideRequest(
       const balance = await balanceLinesAsOf(request.userId, todayKey());
       const copyRecipients = await leaveNotificationRecipients(request.userId);
 
-      fireEmails([
+      await fireEmails([
         {
           to: { userId: request.userId, name: request.user.name, email: decidedUser.email },
           ...leaveDecisionEmail({
@@ -499,7 +499,7 @@ export async function cancelRequest(
     const balance = await balanceLinesAsOf(request.userId, todayKey());
     const copyRecipients = await leaveNotificationRecipients(request.userId);
 
-    fireEmails([
+    await fireEmails([
       {
         to: { userId: request.userId, name: request.user.name, email: request.user.email },
         ...leaveCancelledEmail({
@@ -744,7 +744,7 @@ export async function claimCompOff(
     if (approverUser) {
       const { compOffClaimedEmail } = await import("@/lib/email/templates");
       const { fireEmails } = await import("@/lib/email/context");
-      fireEmails([
+      await fireEmails([
         {
           to: { userId: user.managerId, name: approverUser.name, email: approverUser.email },
           ...compOffClaimedEmail({
@@ -829,7 +829,7 @@ export async function decideCompOff(
 
   const { compOffDecisionEmail } = await import("@/lib/email/templates");
   const { fireEmails } = await import("@/lib/email/context");
-  fireEmails([
+  await fireEmails([
     {
       to: { userId: credit.userId, name: credit.user.name, email: credit.user.email },
       ...compOffDecisionEmail({
@@ -891,7 +891,7 @@ export async function warnExpiringCompOffs(asOf: DayKey = todayKey(), withinDays
 
   for (const c of soon) {
     await db.compOffCredit.update({ where: { id: c.id }, data: { expiryWarnedAt: new Date() } });
-    fireEmails([
+    await fireEmails([
       {
         to: { userId: c.userId, name: c.user.name, email: c.user.email },
         ...compOffExpiringEmail({

@@ -187,7 +187,7 @@ export async function createEmployee(
     const { newEmployeeWelcomeEmail } = await import("@/lib/email/templates");
     const { fireEmails } = await import("@/lib/email/context");
     const { APP_URL } = await import("@/lib/email/shell");
-    fireEmails([
+    await fireEmails([
       {
         to: { userId: user.id, name: user.name, email },
         ...newEmployeeWelcomeEmail({
@@ -399,7 +399,7 @@ export async function resetPassword(
   const { passwordResetEmail } = await import("@/lib/email/templates");
   const { fireEmails } = await import("@/lib/email/context");
   const { APP_URL } = await import("@/lib/email/shell");
-  fireEmails([
+  await fireEmails([
     {
       to: { userId, name: user.name, email: user.email },
       ...passwordResetEmail({
